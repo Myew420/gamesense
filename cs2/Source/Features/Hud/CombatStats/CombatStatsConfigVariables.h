@@ -13,6 +13,8 @@ inline constexpr auto kFeedLifetimeRange = RangeConstrainedVariableParams<std::u
 
 
 inline constexpr auto kCounterOffsetRange = RangeConstrainedVariableParams<float>{.min = 0.0f, .max = 4096.0f, .def = 0.0f};
+CONFIG_VARIABLE(CountersEnabled, bool, true);
+CONFIG_VARIABLE(FeedEnabled, bool, true);
 CONFIG_VARIABLE_RANGE(FeedLifetime, kFeedLifetimeRange);
 CONFIG_VARIABLE_RANGE(FeedOffsetX, kOffsetRange);
 CONFIG_VARIABLE_RANGE(FeedOffsetY, kOffsetRange);

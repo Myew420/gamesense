@@ -2,6 +2,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <unistd.h>
+
 #include <Platform/Linux/LinuxDynamicLibrary.h>
 
 namespace
@@ -155,6 +159,17 @@ INSTANTIATE_TEST_SUITE_P(, TestLinuxDynamicLibrary_String, testing::Values("clie
 void* LinuxPlatformApi::dlopen(const char* file, int mode) noexcept
 {
     return MockLinuxPlatformApi::instance->dlopen(file, mode);
+}
+
+// Real implementation (same as LinuxPlatformApiImpl.h) - process_vm_readv on our own
+// pid works in-process, and ChamsMaterialsTests exercises the fail-closed pointer
+// verification through it. Defined here because this TU owns the test-binary platform
+// symbols; do not include LinuxPlatformApiImpl.h in a test TU (duplicate definitions).
+bool LinuxPlatformApi::safeRead(const void* address, void* out, std::size_t size) noexcept
+{
+    iovec local{out, size};
+    iovec remote{const_cast<void*>(address), size};
+    return ::syscall(SYS_process_vm_readv, ::getpid(), &local, 1, &remote, 1, 0) == static_cast<long>(size);
 }
 
 void* LinuxPlatformApi::dlsym(void* handle, const char* name) noexcept

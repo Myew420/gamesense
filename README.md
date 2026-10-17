@@ -28,7 +28,7 @@ pattern re-anchors are the main maintenance work and pull requests are very welc
 | Piece | What it is |
 |---|---|
 | `cs2/` → `libMangoHud.so` | 64-bit module injected into the CS2 process. Hooks `vkQueuePresentKHR`/`vkAcquireNextImageKHR` to render the ImGui overlay through the game's own Vulkan, hooks the input/net paths for movement and combat features, and embeds a LuaJIT 2.1 runtime for user scripts. |
-| `cs2/` → `libSteamModule.so` | 32-bit module injected into the Steam client process. Hooks libc filesystem calls (`open`, `openat`, `stat`, `lstat`) to conceal the game's injected memory descriptors from Steam-side sweeps. |
+| `cs2/` → `libSteamModule.so` | 64-bit module injected into the Steam client process (64-bit since the 2026-10-17 steamrt64 update). Patches `steamservice.so`'s GOT so its `fopen`/`fopen64`/`open`/`open64`/`fgets`/`read` calls filter our module's lines out of `/proc/*/maps` reads, concealing the injected memory descriptors from Steam-side sweeps. |
 | [neversneeze-loader](https://github.com/Broshan1337/neversneeze-loader) | External ELF loader. Packs the payloads, signs them, injects via anonymous memfds and stamps the cryptographic session trailer the modules verify. |
 | `cs2/inject.sh` | Scripted fallback (`inject_memfd` + GDB). Does **not** stamp a session trailer — see below. |
 
@@ -107,13 +107,12 @@ cmake -B cs2/build-dbg -S cs2 -DCMAKE_BUILD_TYPE=Debug -DNEVERSNOOZE_OBFUSCATE=O
 cmake --build cs2/build-dbg --target Neversnooze
 ```
 
-Steam module (32-bit) — needs its **own** build tree (the 64- and 32-bit targets write the
-same output name and cannot share a directory), and the option spelled exactly as below:
+Steam module (64-bit, native target since the 2026-10-17 steamrt64 client update) — the
+Loader/inject.sh read it from its own tree:
 
 ```sh
-cmake -B cs2/build-steam -S cs2 \
-    -DNEVERSNOOZE_BUILD_STEAM_MODULE32:BOOL=ON -DNEVERSNOOZE_OBFUSCATE=OFF
-cmake --build cs2/build-steam --target SteamModule32
+cmake -B cs2/build-steam -S cs2 -DNEVERSNOOZE_OBFUSCATE=OFF
+cmake --build cs2/build-steam --target SteamModule
 ```
 
 TF2 module:

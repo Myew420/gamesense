@@ -58,8 +58,8 @@ if [ "$need_build" -eq 1 ]; then
     
     if [ "$do_build" = "y" ] || [ "$do_build" = "Y" ]; then
         echo ""
-        echo "[Build] Building Steam module (32-bit)..."
-        cmake --build "$project_dir/build-steam" --target SteamModule32 2>&1 | tail -5
+        echo "[Build] Building Steam module (64-bit)..."
+        cmake --build "$project_dir/build-steam" --target SteamModule 2>&1 | tail -5
         
         echo ""
         echo "[Build] Building Neversnooze (64-bit)..."
@@ -76,7 +76,16 @@ echo ""
 # STEP 1: Steam Module
 # ============================================
 
-steam_pid=$(pidof steam 2>/dev/null | cut -d' ' -f1 || true)
+# 2026-10-17: the 64-bit client runs TWO comm="steam" processes - the thin steam.sh
+# launcher and the real client (pressure-vessel, loads steamclient.so). Inject into the
+# client: the launcher never loads steamservice.so, so the module would stay inert.
+steam_pid=""
+for p in $(pidof steam 2>/dev/null); do
+    if grep -q "steamclient.so" "/proc/$p/maps" 2>/dev/null; then
+        steam_pid="$p"
+        break
+    fi
+done
 
 if [ -n "$steam_pid" ]; then
     echo "[Steam] Found Steam (PID: $steam_pid)"
@@ -89,7 +98,7 @@ if [ -n "$steam_pid" ]; then
         
         if [ ! -f "$steam_module" ]; then
             echo "[Steam] Error: Module not found"
-            echo "[Steam] Build it first: cmake --build build-steam --target SteamModule32"
+            echo "[Steam] Build it first: cmake --build build-steam --target SteamModule"
         else
             echo "[Steam] Injecting..."
             

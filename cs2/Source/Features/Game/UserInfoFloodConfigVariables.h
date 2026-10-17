@@ -52,6 +52,7 @@ CONFIG_VARIABLE(FloodXhSize, bool, false);
 CONFIG_VARIABLE(FloodXhGap, bool, false);
 CONFIG_VARIABLE(FloodXhThick, bool, false);
 CONFIG_VARIABLE(FloodXhOutline, bool, false);
+CONFIG_VARIABLE(FloodXhOutlineThick, bool, false);
 CONFIG_VARIABLE(FloodXhDot, bool, false);
 CONFIG_VARIABLE(FloodXhAlpha, bool, false);
 CONFIG_VARIABLE(FloodXhSniper, bool, false);

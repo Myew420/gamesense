@@ -201,7 +201,7 @@ private:
         case 11: return GET_CONFIG_VAR(userinfo_flood_vars::FloodXhSniper);
         case 12: return GET_CONFIG_VAR(userinfo_flood_vars::FloodLoadout);
         case 13: return GET_CONFIG_VAR(userinfo_flood_vars::FloodTeamId);
-        case 14: return GET_CONFIG_VAR(userinfo_flood_vars::FloodXhOutline);
+        case 14: return GET_CONFIG_VAR(userinfo_flood_vars::FloodXhOutlineThick);
         case 15: return GET_CONFIG_VAR(userinfo_flood_vars::FloodXhColorR);
         case 16: return GET_CONFIG_VAR(userinfo_flood_vars::FloodXhColorG);
         default: return GET_CONFIG_VAR(userinfo_flood_vars::FloodXhColorB);

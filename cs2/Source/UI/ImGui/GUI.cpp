@@ -341,8 +341,7 @@ void GUI::hideMenuNow() noexcept
 {
     if (!menuOpen.exchange(false, std::memory_order_acq_rel))
         return;
-    gui_log::write("menu CLOSE via escape/delete");
-    synthesizeMenuCloseInput(); 
+    synthesizeMenuCloseInput();
 }
 
 bool GUI::isInitialized() noexcept

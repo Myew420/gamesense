@@ -49,6 +49,10 @@ inline constexpr auto kGlowSpeed = RangeConstrainedVariableParams<float>{.min = 
 
 inline constexpr auto kGlowSize = RangeConstrainedVariableParams<float>{.min = 6.0f, .max = 60.0f, .def = 15.0f};
 
+// Persisted shell drag position (offset from the centered default). Wide bounds:
+// the toolbar drag already clamps to keep the shell on the display.
+inline constexpr auto kMenuOffsetRange = RangeConstrainedVariableParams<float>{.min = -8192.0f, .max = 8192.0f, .def = 0.0f};
+
 }
 
 CONFIG_VARIABLE(MenuAccentColor, color::Rgba, (menu_theme_vars::readableOnDark(menu_theme_vars::kDefaultAccent)));
@@ -69,3 +73,6 @@ CONFIG_VARIABLE(MenuStyleRainbow, bool, false);
 
 
 CONFIG_VARIABLE(MenuReduceMotion, bool, false);
+
+CONFIG_VARIABLE_RANGE(MenuOffsetX, menu_theme_vars::kMenuOffsetRange);
+CONFIG_VARIABLE_RANGE(MenuOffsetY, menu_theme_vars::kMenuOffsetRange);

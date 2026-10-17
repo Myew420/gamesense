@@ -19,6 +19,10 @@ target_link_libraries(Neversnooze PRIVATE ${CMAKE_DL_LIBS})
 target_compile_definitions(Neversnooze PRIVATE NS_PATTERN_VAULT_REQUIRES_SESSION)
 
 # ---- Steam Module (separate target for Steam process injection) --------------------
+# Native 64-bit since the 2026-10-17 Steam client update (steamrt64): the client binary AND
+# steamservice.so are x86-64 now, so a 32-bit module is refused by dlopen. The source is
+# arch-portable (__SIZEOF_POINTER__ Elf32/Elf64 switch) - if a 32-bit Steam variant ever
+# returns, build this same source with -m32 in its own tree (the old SteamModule32 target).
 add_library(SteamModule SHARED SteamModule/steam_module.cpp)
 
 set_target_properties(SteamModule PROPERTIES
@@ -29,28 +33,6 @@ set_target_properties(SteamModule PROPERTIES
 
 target_include_directories(SteamModule PRIVATE "${CMAKE_SOURCE_DIR}/Source")
 target_link_libraries(SteamModule PRIVATE ${CMAKE_DL_LIBS} pthread)
-
-# ---- Steam Module 32-bit (Steam runs as 32-bit process) ---------------------------
-# Built in its OWN tree (build-steam, see inject.sh), NOT here: both modules use the source file
-# and output name, so defining both targets in one build directory makes two rules generate
-# Source/libSteamModule.so - ninja aborts every build of the tree on it. Configure with
-# -DNEVERSNOOZE_BUILD_STEAM_MODULE32=ON (as build-steam is) to get this target.
-option(NEVERSNOOZE_BUILD_STEAM_MODULE32 "Also define the 32-bit SteamModule target (build-steam tree only)" OFF)
-if(NEVERSNOOZE_BUILD_STEAM_MODULE32 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-  add_library(SteamModule32 SHARED SteamModule/steam_module.cpp)
-  
-  set_target_properties(SteamModule32 PROPERTIES
-    CXX_VISIBILITY_PRESET hidden
-    C_VISIBILITY_PRESET hidden
-    POSITION_INDEPENDENT_CODE ON
-    OUTPUT_NAME "SteamModule")
-  
-  target_include_directories(SteamModule32 PRIVATE "${CMAKE_SOURCE_DIR}/Source")
-  target_link_libraries(SteamModule32 PRIVATE ${CMAKE_DL_LIBS} pthread)
-  
-  target_compile_options(SteamModule32 PRIVATE -m32)
-  target_link_options(SteamModule32 PRIVATE -m32)
-endif()
 
 # ---- SDL3 headers (UI input backend) ----------------------------------------------------
 #
@@ -292,9 +274,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_link_libraries(Neversnooze PRIVATE c)
 
     target_compile_options(SteamModule PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-stack-protector -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables>)
-    if(TARGET SteamModule32)
-      target_compile_options(SteamModule32 PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-stack-protector -fno-exceptions -fno-asynchronous-unwind-tables -fno-unwind-tables>)
-    endif()
     
     # Crash triage paths:
     # - Default (NEVERSNOOZE_SHIP=OFF): --strip-debug keeps .symtab + the -g1 line tables, so a
@@ -321,22 +300,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
                       "$<TARGET_FILE:${_ns_target}>")
           endif()
         endforeach()
-        if(TARGET SteamModule32)
-          add_custom_command(TARGET SteamModule32 POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${_ns_ship_debug_dir}
-            COMMAND ${CMAKE_OBJCOPY} --only-keep-debug "$<TARGET_FILE:SteamModule32>"
-                    "${_ns_ship_debug_dir}/$<TARGET_FILE_NAME:SteamModule32>.debug"
-            COMMAND ${CMAKE_STRIP} --strip-all "$<TARGET_FILE:SteamModule32>"
-            COMMAND ${CMAKE_OBJCOPY}
-                    --add-gnu-debuglink="${_ns_ship_debug_dir}/$<TARGET_FILE_NAME:SteamModule32>.debug"
-                    "$<TARGET_FILE:SteamModule32>")
-        endif()
       else()
         add_custom_command(TARGET Neversnooze POST_BUILD COMMAND ${CMAKE_STRIP} --strip-debug "$<TARGET_FILE:Neversnooze>")
         add_custom_command(TARGET SteamModule POST_BUILD COMMAND ${CMAKE_STRIP} --strip-debug "$<TARGET_FILE:SteamModule>")
-        if(TARGET SteamModule32)
-          add_custom_command(TARGET SteamModule32 POST_BUILD COMMAND ${CMAKE_STRIP} --strip-debug "$<TARGET_FILE:SteamModule32>")
-        endif()
       endif()
     endif()
   endif()

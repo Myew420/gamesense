@@ -151,6 +151,8 @@ private:
     void combatStatsObject(auto&& configConversion)
     {
         configConversion.beginObject(u8"CombatStats");
+        configConversion.boolean(u8"CountersEnabled", loadVariable<combat_stats_vars::CountersEnabled>(), saveVariable<combat_stats_vars::CountersEnabled>());
+        configConversion.boolean(u8"FeedEnabled", loadVariable<combat_stats_vars::FeedEnabled>(), saveVariable<combat_stats_vars::FeedEnabled>());
         configConversion.uint(u8"FeedLifetime", loadVariable<combat_stats_vars::FeedLifetime>(), saveVariable<combat_stats_vars::FeedLifetime>());
         configConversion.floating(u8"FeedOffsetX", loadVariable<combat_stats_vars::FeedOffsetX>(), saveVariable<combat_stats_vars::FeedOffsetX>());
         configConversion.floating(u8"FeedOffsetY", loadVariable<combat_stats_vars::FeedOffsetY>(), saveVariable<combat_stats_vars::FeedOffsetY>());
@@ -163,6 +165,7 @@ private:
     void statusPanelObject(auto&& configConversion)
     {
         configConversion.beginObject(u8"StatusPanel");
+        configConversion.boolean(u8"Enabled", loadVariable<status_panel_vars::Enabled>(), saveVariable<status_panel_vars::Enabled>());
         configConversion.floating(u8"OffsetX", loadVariable<status_panel_vars::OffsetX>(), saveVariable<status_panel_vars::OffsetX>());
         configConversion.floating(u8"OffsetY", loadVariable<status_panel_vars::OffsetY>(), saveVariable<status_panel_vars::OffsetY>());
         configConversion.endObject();
@@ -862,6 +865,8 @@ private:
         configConversion.boolean(u8"GlowDebug", loadVariable<MenuGlowDebug>(), saveVariable<MenuGlowDebug>());
         configConversion.boolean(u8"StyleRainbow", loadVariable<MenuStyleRainbow>(), saveVariable<MenuStyleRainbow>());
         configConversion.boolean(u8"ReduceMotion", loadVariable<MenuReduceMotion>(), saveVariable<MenuReduceMotion>());
+        configConversion.floating(u8"OffsetX", loadVariable<MenuOffsetX>(), saveVariable<MenuOffsetX>());
+        configConversion.floating(u8"OffsetY", loadVariable<MenuOffsetY>(), saveVariable<MenuOffsetY>());
         configConversion.endObject();
         configConversion.endObject();
     }
@@ -1009,6 +1014,7 @@ private:
         configConversion.boolean(u8"FloodXhGap", loadVariable<userinfo_flood_vars::FloodXhGap>(), saveVariable<userinfo_flood_vars::FloodXhGap>());
         configConversion.boolean(u8"FloodXhThick", loadVariable<userinfo_flood_vars::FloodXhThick>(), saveVariable<userinfo_flood_vars::FloodXhThick>());
         configConversion.boolean(u8"FloodXhOutline", loadVariable<userinfo_flood_vars::FloodXhOutline>(), saveVariable<userinfo_flood_vars::FloodXhOutline>());
+        configConversion.boolean(u8"FloodXhOutlineThick", loadVariable<userinfo_flood_vars::FloodXhOutlineThick>(), saveVariable<userinfo_flood_vars::FloodXhOutlineThick>());
         configConversion.boolean(u8"FloodXhDot", loadVariable<userinfo_flood_vars::FloodXhDot>(), saveVariable<userinfo_flood_vars::FloodXhDot>());
         configConversion.boolean(u8"FloodXhAlpha", loadVariable<userinfo_flood_vars::FloodXhAlpha>(), saveVariable<userinfo_flood_vars::FloodXhAlpha>());
         configConversion.boolean(u8"FloodXhSniper", loadVariable<userinfo_flood_vars::FloodXhSniper>(), saveVariable<userinfo_flood_vars::FloodXhSniper>());
@@ -1152,6 +1158,18 @@ private:
         configConversion.boolean(u8"HideLocalPlayer", loadVariable<chams_vars::HideLocalPlayer>(), saveVariable<chams_vars::HideLocalPlayer>());
         configConversion.boolean(u8"Enabled", loadVariable<chams_vars::Enabled>(), saveVariable<chams_vars::Enabled>());
         configConversion.uint(u8"EnemyColor", loadVariable<chams_vars::EnemyColor>(), saveVariable<chams_vars::EnemyColor>());
+        configConversion.uint(u8"MaterialType", loadVariable<chams_vars::MaterialType>(), saveVariable<chams_vars::MaterialType>());
+        configConversion.uint(u8"EnemyOccludedColor", loadVariable<chams_vars::EnemyOccludedColor>(), saveVariable<chams_vars::EnemyOccludedColor>());
+        configConversion.boolean(u8"DrawOccluded", loadVariable<chams_vars::DrawOccluded>(), saveVariable<chams_vars::DrawOccluded>());
+        configConversion.boolean(u8"Teammates", loadVariable<chams_vars::Teammates>(), saveVariable<chams_vars::Teammates>());
+        configConversion.uint(u8"TeamColor", loadVariable<chams_vars::TeamColor>(), saveVariable<chams_vars::TeamColor>());
+        configConversion.uint(u8"TeamOccludedColor", loadVariable<chams_vars::TeamOccludedColor>(), saveVariable<chams_vars::TeamOccludedColor>());
+        configConversion.boolean(u8"ViewmodelEnabled", loadVariable<chams_vars::ViewmodelEnabled>(), saveVariable<chams_vars::ViewmodelEnabled>());
+        configConversion.uint(u8"ViewmodelMaterialType", loadVariable<chams_vars::ViewmodelMaterialType>(), saveVariable<chams_vars::ViewmodelMaterialType>());
+        configConversion.uint(u8"ViewmodelColor", loadVariable<chams_vars::ViewmodelColor>(), saveVariable<chams_vars::ViewmodelColor>());
+        configConversion.boolean(u8"OwnWeaponsEnabled", loadVariable<chams_vars::OwnWeaponsEnabled>(), saveVariable<chams_vars::OwnWeaponsEnabled>());
+        configConversion.uint(u8"OwnWeaponsMaterialType", loadVariable<chams_vars::OwnWeaponsMaterialType>(), saveVariable<chams_vars::OwnWeaponsMaterialType>());
+        configConversion.uint(u8"OwnWeaponsColor", loadVariable<chams_vars::OwnWeaponsColor>(), saveVariable<chams_vars::OwnWeaponsColor>());
         configConversion.endObject();
 
         configConversion.beginObject(u8"Footsteps");

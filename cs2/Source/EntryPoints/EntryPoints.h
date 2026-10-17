@@ -118,6 +118,8 @@
 #include <Hooks/TeamSelectEventGuard.h>
 #include <Hooks/ChamsHook.h>
 #include <Features/Visuals/Chams/Chams.h>
+#include <Features/Visuals/Chams/ChamsMaterials.h>
+#include <UI/ImGui/GuiLog.h>
 
 [[NOINLINE]] void finishInit(auto& hookContext)
 {
@@ -881,6 +883,19 @@ void CSGOInputHook_onCreateMove(cs2::CCSGOInput* thisptr, int slot, cs2::CUserCm
     
     hookContext.template make<AgentChanger>().run();
 
+    // Chams runtime materials: create the vmat set ONCE on the main thread while the
+    // feature is enabled (see the THREAD RULE note in chams_hook::onGeneratePrimitives).
+    if ((GET_CONFIG_VAR(chams_vars::Enabled)
+            || GET_CONFIG_VAR(chams_vars::ViewmodelEnabled)
+            || GET_CONFIG_VAR(chams_vars::OwnWeaponsEnabled))
+        && chams_materials::needsCreation()) {
+        if (chams_materials::ensureMaterialsCreated())
+            VerifyConsole::write(0.0f, "chams-mat", "materials ready");
+        else
+            VerifyConsole::write(0.0f, "chams-mat", "creation failed: %s (color-only fallback)",
+                chams_materials::lastError());
+    }
+
     
     
     hookContext.template make<RevealRadar>().run();
@@ -1370,12 +1385,90 @@ void scene_render_hooks::onAggregateSceneObjectDrawArray(void* sceneObjectDesc, 
 }
 
 
-inline int chamsCallsUntilSnapshot{0};
+inline std::atomic<int> chamsCallsUntilSnapshot{0};
 
 
 
 
 
+
+void chams_hook::onSceneObjectDrawArray(void* desc, void* renderContext, void* primitives, unsigned primitiveCount,
+    void* sceneView, void* sceneLayer, void* perFrameStats) noexcept
+{
+    using SceneDrawArrayFn = void(*)(void*, void*, void*, unsigned, void*, void*, void*);
+    const auto original = reinterpret_cast<SceneDrawArrayFn>(chams_hook::originalDrawArrayFor(desc));
+
+    const bool shuttingDown = HookQuiesce::isShuttingDown();
+    HookQuiesce::InFlight flight;
+    if (shuttingDown || !original) {
+        if (original)
+            RetAddrSpoofer::spoof(original)(desc, renderContext, primitives, primitiveCount, sceneView, sceneLayer, perFrameStats);
+        return;
+    }
+
+    HookContext<GlobalContext> hookContext;
+    const bool chamsEnabled = GET_CONFIG_VAR(chams_vars::Enabled);
+    const bool worldModEnabled = false; // world recolor owns its own DrawArray hooks
+    const bool hideSupported = Chams<HookContext<GlobalContext>>::hideModelsSupported();
+    const bool hideEnemies = hideSupported && GET_CONFIG_VAR(chams_vars::HideEnemies);
+    const bool hideLocal = hideSupported && GET_CONFIG_VAR(chams_vars::HideLocalPlayer);
+    if (!chamsEnabled && !worldModEnabled && !hideEnemies && !hideLocal) {
+        RetAddrSpoofer::spoof(original)(desc, renderContext, primitives, primitiveCount, sceneView, sceneLayer, perFrameStats);
+        return;
+    }
+
+    auto&& chams = hookContext.template make<Chams>();
+    if (primitives && primitiveCount > 0) {
+        const void* sceneObject = chams.sceneObjectOfFirstPrimitive(primitives);
+        if (sceneObject) {
+            const bool overlayTarget = chams.wantsOverlayPass(sceneObject);
+            const bool targetIsEnemy = chams.overlayPassIsEnemy(sceneObject);
+
+            // Hide models: skipping the original call = the mesh never draws (superior
+            // to the old GeneratePrimitives count rollback, and it finally covers
+            // bodies - the draw-side call is the one that matters).
+            if ((hideEnemies && overlayTarget && targetIsEnemy)
+                || (hideLocal && chams.ownsLocalPawn(sceneObject)))
+                return;
+
+            if (chamsEnabled && overlayTarget && chams_materials::materialsReady()) {
+                const auto materialType = static_cast<chams_materials::Type>(
+                    static_cast<std::uint8_t>(GET_CONFIG_VAR(chams_vars::MaterialType)));
+                auto* const visibleMaterial = chams_materials::materialFor(materialType, false);
+                auto* const occludedMaterial = chams_materials::materialFor(materialType, true);
+                const bool drawOccluded = GET_CONFIG_VAR(chams_vars::DrawOccluded);
+                const auto visibleColor = Chams<HookContext<GlobalContext>>::primitiveColor(
+                    targetIsEnemy ? GET_CONFIG_VAR(chams_vars::EnemyColor) : GET_CONFIG_VAR(chams_vars::TeamColor));
+                const auto occludedColor = Chams<HookContext<GlobalContext>>::primitiveColor(
+                    targetIsEnemy ? GET_CONFIG_VAR(chams_vars::EnemyOccludedColor) : GET_CONFIG_VAR(chams_vars::TeamOccludedColor));
+
+                // The material write happens HERE, at draw time, because the game
+                // re-binds prim+0x20 back to the entity's own material between
+                // GeneratePrimitives and the draw (2026-10-17 live gdb round). This is
+                // also how both public references do it: xsip hooks the Render call,
+                // FrameworkCS2 hooks this exact DrawArray and swaps the material
+                // before calling the trampoline.
+                if (visibleMaterial && (!drawOccluded || occludedMaterial)) {
+                    if (drawOccluded) {
+                        Chams<HookContext<GlobalContext>>::applyMaterialOverrideRange(primitives, primitiveCount,
+                            occludedMaterial, occludedColor);
+                        RetAddrSpoofer::spoof(original)(desc, renderContext, primitives, primitiveCount, sceneView, sceneLayer, perFrameStats);
+                        Chams<HookContext<GlobalContext>>::applyMaterialOverrideRange(primitives, primitiveCount,
+                            visibleMaterial, visibleColor);
+                        RetAddrSpoofer::spoof(original)(desc, renderContext, primitives, primitiveCount, sceneView, sceneLayer, perFrameStats);
+                    } else {
+                        Chams<HookContext<GlobalContext>>::applyMaterialOverrideRange(primitives, primitiveCount,
+                            visibleMaterial, visibleColor);
+                        RetAddrSpoofer::spoof(original)(desc, renderContext, primitives, primitiveCount, sceneView, sceneLayer, perFrameStats);
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
+    RetAddrSpoofer::spoof(original)(desc, renderContext, primitives, primitiveCount, sceneView, sceneLayer, perFrameStats);
+}
 
 void chams_hook::onGeneratePrimitives(void* desc, void* sceneObject, void* sceneView, void* primitives) noexcept
 {
@@ -1394,11 +1487,13 @@ void chams_hook::onGeneratePrimitives(void* desc, void* sceneObject, void* scene
 
     
     const bool chamsEnabled = GET_CONFIG_VAR(chams_vars::Enabled);
+    const bool viewmodelChamsEnabled = GET_CONFIG_VAR(chams_vars::ViewmodelEnabled);
+    const bool ownWeaponsEnabled = GET_CONFIG_VAR(chams_vars::OwnWeaponsEnabled);
     const bool worldModEnabled = GET_CONFIG_VAR(WorldColorsWorldEnabled);
     const bool hideSupported = Chams<HookContext<GlobalContext>>::hideModelsSupported();
     const bool hideEnemies = hideSupported && GET_CONFIG_VAR(chams_vars::HideEnemies);
     const bool hideLocal = hideSupported && GET_CONFIG_VAR(chams_vars::HideLocalPlayer);
-    if (!chamsEnabled && !worldModEnabled && !hideEnemies && !hideLocal) {
+    if (!chamsEnabled && !viewmodelChamsEnabled && !ownWeaponsEnabled && !worldModEnabled && !hideEnemies && !hideLocal) {
         RetAddrSpoofer::spoof(original)(desc, sceneObject, sceneView, primitives);
         return;
     }
@@ -1406,42 +1501,62 @@ void chams_hook::onGeneratePrimitives(void* desc, void* sceneObject, void* scene
     auto&& chams = hookContext.template make<Chams>();
 
     
-    if (chamsCallsUntilSnapshot <= 0) {
+    // Atomic: the GeneratePrimitives hook itself can run on several render threads
+    // (the 2026-10-17 diag showed DrawArray firing on 6+ threads), and the flicker bug
+    // was this counter plus the in-place rebuild racing them. The refresh is now
+    // single-writer + double-buffered inside Chams; this counter just paces it.
+    if (chamsCallsUntilSnapshot.fetch_sub(1, std::memory_order_relaxed) <= 1) {
         chams.refreshLivePawnPointers();
-        chamsCallsUntilSnapshot = Chams<HookContext<GlobalContext>>::kSnapshotRefreshInterval;
+        chamsCallsUntilSnapshot.store(Chams<HookContext<GlobalContext>>::kSnapshotRefreshInterval, std::memory_order_relaxed);
     }
-    --chamsCallsUntilSnapshot;
 
     const auto previousCount = Chams<HookContext<GlobalContext>>::primitiveCount(primitives);
     RetAddrSpoofer::spoof(original)(desc, sceneObject, sceneView, primitives);
-    const bool enemyMesh = chams.wantsOverlayPass(sceneObject);
-    if (!Chams<HookContext<GlobalContext>>::isOutlineGeneration(
-            reinterpret_cast<std::uintptr_t>(__builtin_return_address(0)))
-        && ((hideEnemies && enemyMesh) || (hideLocal && chams.ownsLocalPawn(sceneObject)))) {
-        Chams<HookContext<GlobalContext>>::suppressGeneratedPrimitives(primitives, previousCount);
+    // Own viewmodel chams (first-person hands + weapon). The viewmodel draws through
+    // the libscenesystem descs, so the real-material override applies. Single pass -
+    // no occluded variant for your own hands. Materials are THE chams now (the old
+    // color-only path is gone): if creation failed, the status line on the Chams page
+    // shows the verdict and nothing draws (fail-closed).
+    if (viewmodelChamsEnabled && chams.isPartOfViewmodel(sceneObject)) {
+        if (chams_materials::materialsReady()) {
+            const auto materialType = static_cast<chams_materials::Type>(
+                static_cast<std::uint8_t>(GET_CONFIG_VAR(chams_vars::ViewmodelMaterialType)));
+            if (auto* const viewmodelMaterial = chams_materials::materialFor(materialType, false)) {
+                const auto end = Chams<HookContext<GlobalContext>>::primitiveCount(primitives);
+                Chams<HookContext<GlobalContext>>::applyMaterialOverride(primitives, previousCount, end,
+                    viewmodelMaterial, Chams<HookContext<GlobalContext>>::primitiveColor(GET_CONFIG_VAR(chams_vars::ViewmodelColor)));
+                return;
+            }
+        }
         return;
     }
 
-    if (chamsEnabled && chams.wantsOverlayPass(sceneObject)) {
-        
-        
-        
-        
-        
-        
-        if (primitives)
-            Chams<HookContext<GlobalContext>>::applyOverlay(primitives, previousCount,
-                Chams<HookContext<GlobalContext>>::primitiveColor(GET_CONFIG_VAR(chams_vars::EnemyColor)));
+    // Own weapons chams - the LOCAL player's weapon models as rendered attached to the
+    // character (third person / shadows). Distinguished from the viewmodel layer by the
+    // scene-object flag and from the local BODY by the desc class (skeletal bodies
+    // cannot take the per-prim material override - see the enemy branch note).
+    if (ownWeaponsEnabled
+        && !chams.isPartOfViewmodel(sceneObject)
+        && chams.ownsLocalPawn(sceneObject)) {
+        if (chams_materials::materialsReady()) {
+            const auto materialType = static_cast<chams_materials::Type>(
+                static_cast<std::uint8_t>(GET_CONFIG_VAR(chams_vars::OwnWeaponsMaterialType)));
+            if (auto* const ownWeaponMaterial = chams_materials::materialFor(materialType, false)) {
+                const auto end = Chams<HookContext<GlobalContext>>::primitiveCount(primitives);
+                Chams<HookContext<GlobalContext>>::applyMaterialOverride(primitives, previousCount, end,
+                    ownWeaponMaterial, Chams<HookContext<GlobalContext>>::primitiveColor(GET_CONFIG_VAR(chams_vars::OwnWeaponsColor)));
+                return;
+            }
+        }
         return;
     }
 
-    
-    
-    
-    
-    
-    
-    
+    // Enemy/team chams and player-model hiding moved to the DRAW side
+    // (chams_hook::onSceneObjectDrawArray): the game re-binds the primitive material
+    // between generation and the draw, so writing it here never reached the body
+    // draws - 2026-10-17 live round. This hook keeps the viewmodel + own-weapon
+    // material passes (both proven to survive - the viewmodel/body rebinding does
+    // not affect them) and the world recolor.
     if (worldModEnabled && primitives && !chams.ownsLocalPawn(sceneObject))
         Chams<HookContext<GlobalContext>>::applyOverlay(primitives, previousCount,
             Chams<HookContext<GlobalContext>>::primitiveColor(GET_CONFIG_VAR(WorldColorsWorldColor)));

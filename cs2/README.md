@@ -72,8 +72,9 @@ cmake -B cs2/build-obf-test -S cs2 \
 - `-DNEVERSNOOZE_SHIP:BOOL=ON` (default): the release link is fully stripped and the symbol
   table is preserved only in a local `<build>/Source/ship-debug/<name>.debug` copy +
   `.gnu_debuglink`, so you can still symbolize your own crashes.
-- `-DNEVERSNOOZE_BUILD_STEAM_MODULE32:BOOL=ON` builds the Steam-side module. Spell it
-  exactly — an untyped `-D` with a typo'd name silently leaves the target out of the build.
+- The Steam-side module is the plain native `SteamModule` target (64-bit since the
+  2026-10-17 steamrt64 client update — the old `-m32` `SteamModule32` target is deleted;
+  Steam refuses 32-bit modules now): `cmake --build build-steam --target SteamModule`.
 
 ## Session binding / heartbeats
 

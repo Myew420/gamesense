@@ -416,10 +416,19 @@ static void init_hooks(void)
     void** open_got = g_orig_open ? find_got_entry(steamservice_base, "open") : nullptr;
     void** read_got = g_orig_read ? find_got_entry(steamservice_base, "read") : nullptr;
     void** fclose_got = g_orig_fclose ? find_got_entry(steamservice_base, "fclose") : nullptr;
+    // 64-bit steamservice.so (steamrt64) also imports the *64 opener variants - same
+    // signatures on x86-64, so the same hooks cover them; leaving them unhooked would
+    // let any fopen64/open64 caller bypass the maps filter.
+    void** fopen64_got = find_got_entry(steamservice_base, "fopen64");
+    void** open64_got = g_orig_open ? find_got_entry(steamservice_base, "open64") : nullptr;
 
     if (fopen_got) {
         patch_got(fopen_got, (void*)hook_fopen);
         fprintf(stderr, "[SteamVAC] Hooked fopen at %p\n", fopen_got);
+    }
+    if (fopen64_got) {
+        patch_got(fopen64_got, (void*)hook_fopen);
+        fprintf(stderr, "[SteamVAC] Hooked fopen64 at %p\n", fopen64_got);
     }
     if (fgets_got) {
         patch_got(fgets_got, (void*)hook_fgets);
@@ -428,6 +437,10 @@ static void init_hooks(void)
     if (open_got) {
         patch_got(open_got, (void*)hook_open);
         fprintf(stderr, "[SteamVAC] Hooked open at %p\n", open_got);
+    }
+    if (open64_got) {
+        patch_got(open64_got, (void*)hook_open);
+        fprintf(stderr, "[SteamVAC] Hooked open64 at %p\n", open64_got);
     }
     if (read_got) {
         patch_got(read_got, (void*)hook_read);
