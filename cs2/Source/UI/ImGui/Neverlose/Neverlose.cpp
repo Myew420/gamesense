@@ -349,6 +349,8 @@ extern "C" const unsigned char _binary_NotoCJK_subset_ttf_end[];
 
 
 constexpr ImWchar kIconCodepoints[] = {
+    0xf009, 
+    0xf1b3, 
     0xf002, 
     0xf005, 
     0xf007, 
@@ -552,10 +554,7 @@ ImVec2 shellBase{0.0f, 0.0f};
 
 
 
-// Covers every row on all 16 pages incl. the Inventory ghost pass (~6x30 rows)
-// and Lua script gui cards (up to 16 scripts x 96 items). beginRow/cardDivider
-// drop entries silently past this cap - keep it comfortably above the real max.
-constexpr int kSearchIndexCap = 2048;
+constexpr int kSearchIndexCap = 512;
 
 struct SearchEntry {
     const char* label;
@@ -995,10 +994,6 @@ float drawLabelFit(ImDrawList* d, float x, float y, float h, ImU32 color, const 
     const float ellipsisW = font->CalcTextSizeA(size, FLT_MAX, 0.0f, "...").x;
     while (label[len] && len < static_cast<int>(sizeof(buf)) - 1) {
         const int charLen = label[len] < 0x80 ? 1 : label[len] < 0xE0 ? 2 : label[len] < 0xF0 ? 3 : 4;
-        // Leave room for the "...\0" tail - without this a 3-4 byte UTF-8 char
-        // near the end (or the tail memcpy itself) wrote past buf[95].
-        if (len + charLen > static_cast<int>(sizeof(buf)) - 4)
-            break;
         for (int i = 0; i < charLen && label[len + i]; ++i)
             buf[len + i] = label[len + i];
         const int next = len + charLen;
@@ -1079,14 +1074,9 @@ bool toggle(const char* label, bool* value, int id, bool* rightClicked = nullptr
     p.y += rowCentered(s(20.0f));
 
     ImGui::PushID(id);
-    const ImVec2 hitMin = p - ImVec2(s(14), s(6));
-    // Right-click must respect popup occlusion like left-click: when hit() takes
-    // the covered branch it submits a Dummy, and IsItemClicked(Right) would still
-    // fire through the covering popup (closing it via openBindPopover).
-    const bool covered = coveredByPrevPopup(-1, hitMin, hitMin + ImVec2(s(38), s(32)));
-    const bool clicked = hit("##toggle", hitMin, ImVec2(s(38), s(32)));
+    const bool clicked = hit("##toggle", p - ImVec2(s(14), s(6)), ImVec2(s(38), s(32)));
     if (rightClicked)
-        *rightClicked = !covered && ImGui::IsItemClicked(ImGuiMouseButton_Right);
+        *rightClicked = ImGui::IsItemClicked(ImGuiMouseButton_Right);
     
     
     const float on = motion(animKey(0x55aa721u, id), *value ? 1.0f : ImGui::IsItemHovered() ? 0.48f : 0.0f, 19.0f);
@@ -1768,9 +1758,7 @@ void featureBindPopover(ImDrawList* d) noexcept
     const bool accepts = ImGui::GetFrameCount() > state.featureBindOpenedFrame;
     const bool capturing = state.capture != State::Capture::Inactive && state.captureOwner == State::kFeatureBindCaptureOwner;
 
-    // Scaled like every other popover dimension (was a raw 190.0f - stayed
-    // unscaled at menuScale != 1 while the rows inside scaled).
-    const float width = s(190.0f);
+    constexpr float width = 190.0f;
     const float rowH = s(25.0f);
     const float gap = s(7.0f);
     const float headerH = s(30.0f);
@@ -5280,20 +5268,20 @@ void withRadio(Functor&& functor) noexcept
         functor(hookContext.template make<RadioManager>());
     }));
 }
+
 void pageRadio() noexcept
 {
-    // The search-index ghost pass renders this page offscreen - skip the poll and
-    // the auto-browse there, they belong to real visits (opening search must not
-    // fetch stations the user never asked for).
-    if (!searchIndexing) {
-        withRadio([](auto&& radio) { radio.poll(); });
+    withRadio([](auto&& radio) { radio.poll(); });
 
-        static bool initialBrowseFired = false;
-        if (!initialBrowseFired) {
-            initialBrowseFired = true;
-            withRadio([](auto&& radio) { radio.startBrowseLocal(); });
-        }
+    
+    
+    
+    static bool initialBrowseFired = false;
+    if (!initialBrowseFired) {
+        initialBrowseFired = true;
+        withRadio([](auto&& radio) { radio.startBrowseLocal(); });
     }
+
     static char searchBuf[64] = "";
     char encodedQuery[200] = "";
 
@@ -5339,11 +5327,7 @@ void pageRadio() noexcept
     });
 
     ImDrawList* d = ImGui::GetWindowDrawList();
-    // 7 fixed rows (Search, Now Playing, Volume, Broadcast To Voice, Voice Key,
-    // Show Now Playing HUD, Show Desktop Players) + the always-drawn results
-    // header row. The old hand-count of 6 left the last 2 station rows
-    // rendering outside the card border.
-    constexpr int kFixedRows = 8;
+    constexpr int kFixedRows = 6; 
     const int favRows = favCount > 0 ? favCount + 1 : 0; 
     const int recRows = recCount > 0 ? recCount + 1 : 0; 
     const int listRows = stationCount > 0 ? stationCount : 1;
@@ -6286,9 +6270,7 @@ void pageScripts() noexcept
     
     constexpr int kMaxList = 32;
     lua::FileEntry entries[kMaxList];
-    // Skip the directory scan during the search-index ghost pass - its rows are
-    // raw-drawn (no index entries), the readdir is pure waste offscreen.
-    const int fileCount = searchIndexing ? 0 : lua::listFiles(entries, kMaxList);
+    const int fileCount = lua::listFiles(entries, kMaxList);
 
     
     
@@ -6455,9 +6437,6 @@ bool changePage(Page next) noexcept;
 
 void indexNextSearchPage() noexcept
 {
-    // Index EVERY page (bound = the last Page enum value). This was Page::Chams
-    // (mid-enum, value 5) - pages 6..15 (Glow..Unsafe) were never indexed and
-    // silently unsearchable.
     if (searchIndexBuilt || searchIndexPageCursor > static_cast<int>(Page::Unsafe))
         return;
 
@@ -6534,6 +6513,21 @@ void searchOverlay(ImDrawList* d, ImVec2 b) noexcept
     ImGui::PopStyleVar();
     ImGui::PopStyleColor(2);
     ImGui::PopItemWidth();
+
+    
+    
+    
+    
+    static char lastLoggedQuery[sizeof(searchQuery)] = "";
+    if (std::strcmp(searchQuery, lastLoggedQuery) != 0) {
+        std::memcpy(lastLoggedQuery, searchQuery, sizeof(lastLoggedQuery));
+        char hex[3 * sizeof(searchQuery)] = "";
+        std::size_t hexIndex = 0;
+        for (std::size_t i = 0; i < sizeof(searchQuery) && searchQuery[i]; ++i)
+            hexIndex += static_cast<std::size_t>(std::snprintf(hex + hexIndex, sizeof(hex) - hexIndex, "%02X ", static_cast<unsigned char>(searchQuery[i])));
+        gui_log::write("search query: [%s] bytes: %s", searchQuery, hex);
+    }
+
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || (ImGui::IsMouseClicked(0) && ImGui::IsMouseHoveringRect(b, b + ImVec2(kSidebarWidth, kShellHeight)) && ImGui::GetFrameCount() > searchOpenedFrame))
         searchOpen = false;
 
@@ -6960,15 +6954,9 @@ void toolbar(ImDrawList* d, ImVec2 base) noexcept
             const ImVec2 display = ImGui::GetIO().DisplaySize;
             const ImVec2 defaultPos((display.x - kShellWidth) * 0.5f, (display.y - shellHeightBase) * 0.5f);
             menuOffset = dragStartOffset + (ImGui::GetIO().MousePos - dragStartMouse);
-
+            
             menuOffset.x = ImClamp(menuOffset.x, -defaultPos.x + s(8), display.x - kShellWidth - defaultPos.x + s(8));
             menuOffset.y = ImClamp(menuOffset.y, -defaultPos.y + s(8), display.y - kShellHeight - defaultPos.y + s(8));
-            // Persist through the config vars (same pattern as the HUD box drags)
-            // so the shell position survives restarts and config switches.
-            using OffsetXRange = MenuOffsetX::ValueType;
-            using OffsetYRange = MenuOffsetY::ValueType;
-            static_cast<void>(ui_config::set<MenuOffsetX>(OffsetXRange{menuOffset.x}));
-            static_cast<void>(ui_config::set<MenuOffsetY>(OffsetYRange{menuOffset.y}));
         } else {
             draggingWindow = false;
         }
@@ -7451,10 +7439,6 @@ void configPopover(ImDrawList* d, ImVec2 base) noexcept
     const float listHeight = ImMin(fullListHeight, ImMax(s(28), ImGui::GetMainViewport()->Size.y - s(210))) + s(6);
     static float configScroll = 0;
     if (ImGui::GetFrameCount() == configPopoverOpenedFrame) configScroll = 0;
-    // Two-click delete confirm: the first X click arms (2s window), the second
-    // on the same row deletes. One stray click must not destroy a config.
-    static int pendingDeleteIndex = -1;
-    static double pendingDeleteTime = -100.0;
     // Sized to the actual content: 3 action buttons (30 each) + new-name input row
     // (input 24 + buttons 28) + breathing room. The old flat 164 left a dead band at
     // the bottom of the popover.
@@ -7523,26 +7507,17 @@ void configPopover(ImDrawList* d, ImVec2 base) noexcept
             const bool deleted = hitPopupRow("##cfg_del", xc - ImVec2(s(13), s(13)), ImVec2(s(26), s(26)), PopupConfig);
             const bool xHover = ImGui::IsItemHovered();
             ImGui::PopID();
-            const bool armed = pendingDeleteIndex == i && ImGui::GetTime() - pendingDeleteTime < 2.0;
-            const ImU32 xcol = (xHover || armed) ? C(245, 160, 164) : C(120, 124, 134);
-            if (xHover || armed)
-                d->AddCircleFilled(xc, s(9), C(190, 60, 66, armed ? 160 : 90));
-            d->AddLine(xc - ImVec2(s(3), s(3)), xc + ImVec2(s(3), s(3)), xcol, armed ? 2.0f : 1.4f);
-            d->AddLine(xc + ImVec2(s(3), -s(3)), xc + ImVec2(-s(3), s(3)), xcol, armed ? 2.0f : 1.4f);
+            const ImU32 xcol = xHover ? C(245, 160, 164) : C(120, 124, 134);
+            if (xHover)
+                d->AddCircleFilled(xc, s(9), C(190, 60, 66, 90));
+            d->AddLine(xc - ImVec2(s(3), s(3)), xc + ImVec2(s(3), s(3)), xcol, 1.4f);
+            d->AddLine(xc + ImVec2(s(3), -s(3)), xc + ImVec2(-s(3), s(3)), xcol, 1.4f);
             if (deleted) {
-                const double now = ImGui::GetTime();
-                if (armed) {
-                    pendingDeleteIndex = -1;
-                    if (ui_config::deleteConfig(i))
-                        pushToast("Config deleted", g_accent);
-                    else {
-                        gui_log::write("config: failed to delete '%s'", ui_config::listedConfigName(i));
-                        pushToast("Delete failed", C(229, 72, 77));
-                    }
-                } else {
-                    pendingDeleteIndex = i;
-                    pendingDeleteTime = now;
-                    pushToast("Click X again to delete", C(232, 173, 96));
+                if (ui_config::deleteConfig(i))
+                    pushToast("Config deleted", g_accent);
+                else {
+                    gui_log::write("config: failed to delete '%s'", ui_config::listedConfigName(i));
+                    pushToast("Delete failed", C(229, 72, 77));
                 }
             }
         }
@@ -7581,20 +7556,6 @@ void configPopover(ImDrawList* d, ImVec2 base) noexcept
     }
 
     
-    // Half-width pill twins of actionButton for the NEW/RENAME pair - these were
-    // raw ImGui::Button calls, the only unstyled buttons in the whole menu.
-    auto miniActionButton = [&](int id, const char* label, const ImVec2 bp, float buttonWidth) {
-        ImGui::PushID(id);
-        const bool clicked = hitPopupRow("##cfg_mini", bp, ImVec2(buttonWidth, s(26)), PopupConfig);
-        const float hover = motion(animKey(0xa1a2u, id), ImGui::IsItemHovered() ? 1.0f : 0.0f);
-        ImGui::PopID();
-        d->AddRectFilled(bp, bp + ImVec2(buttonWidth, s(26)), mix(kPillBg, kPillBgHover, hover), s(6));
-        d->AddRect(bp, bp + ImVec2(buttonWidth, s(26)), mix(kHairlineSoft, g_accent, hover), s(6));
-        const float labelWidth = ImGui::GetFont()->CalcTextSizeA(kTextControl, FLT_MAX, 0.0f, label).x;
-        textY(d, bp.x + (buttonWidth - labelWidth) * 0.5f, bp.y, s(26), mix(C(170, 173, 184), C(226, 228, 235), hover), label, kTextControl, nullptr);
-        return clicked;
-    };
-
     const ImVec2 inputPos = p + ImVec2(s(8), ay - p.y + s(2.0f));
     ImGui::SetCursorScreenPos(inputPos);
     ImGui::PushItemWidth(width - s(16.0f));
@@ -7602,9 +7563,8 @@ void configPopover(ImDrawList* d, ImVec2 base) noexcept
     ImGui::InputTextWithHint("##nl_new_cfg", "new name", newConfigName, sizeof(newConfigName));
     ImGui::PopStyleVar();
     ImGui::PopItemWidth();
-    const float miniWidth = (width - s(16.0f) - s(6.0f)) * 0.5f;
-    const ImVec2 newBtnPos = inputPos + ImVec2(0.0f, s(28.0f));
-    if (miniActionButton(3, "NEW", newBtnPos, miniWidth)) {
+    ImGui::SetCursorScreenPos(inputPos + ImVec2(0, s(28)));
+    if (ImGui::Button("NEW", ImVec2(s(52.0f), 0.0f))) {
         if (ui_config::createAndSwitchToConfig(newConfigName)) {
             newConfigName[0] = '\0';
             lastCleanConfigEpoch = ui_config::changeEpoch.load(std::memory_order_relaxed);
@@ -7612,14 +7572,15 @@ void configPopover(ImDrawList* d, ImVec2 base) noexcept
         } else
             pushToast("Create failed", C(229, 72, 77));
     }
-    if (miniActionButton(4, "RENAME", newBtnPos + ImVec2(miniWidth + s(6.0f), 0.0f), miniWidth)) {
+    ImGui::SameLine(0.0f, s(4));
+    if (ImGui::Button("RENAME", ImVec2(s(70.0f), 0.0f))) {
         if (ui_config::renameActiveConfig(newConfigName)) {
             newConfigName[0] = '\0';
             pushToast("Config renamed", g_accent);
         } else
             pushToast("Rename failed", C(229, 72, 77));
     }
-    ImGui::SetCursorScreenPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetCursorScreenPos(ImVec2(0.0f, 0.0f)); 
 
     const float eased = g_reduceMotion ? 1.0f : 1.0f - std::pow(1.0f - open, 3.0f);
     const ImVec2 pivot(p.x + size.x * 0.5f, p.y);
@@ -7668,9 +7629,6 @@ void neverlose::render() noexcept
     }
 
     const ImVec2 display = ImGui::GetIO().DisplaySize;
-    // Shell drag position is config-persisted (like the HUD box offsets); the
-    // global mirrors the vars for the one-frame layout math below.
-    menuOffset = ImVec2{static_cast<float>(ui_config::get<MenuOffsetX>()), static_cast<float>(ui_config::get<MenuOffsetY>())};
     const ImVec2 defaultPos((display.x - kShellWidth) * 0.5f, (display.y - shellHeightBase) * 0.5f);
     const ImVec2 shellPos(defaultPos + menuOffset);
 
@@ -7763,17 +7721,13 @@ void neverlose::render() noexcept
         const float previousScrollOffset = scrollOffset;
         maxScroll = ImMax(0.0f, contentHeight - visibleHeight);
         if (ImGui::IsMouseHoveringRect(contentMin, contentMax) && ImGui::GetIO().MouseWheel != 0.0f
-            // Page wheel is locked while ANY popover layer is open, not just the
-            // dropdown/multiselect/color pickers - the config popover and search
-            // overlay open over the content and used to scroll the page behind
-            // them in the same gesture as their own lists.
+            
+            
+            
+            
             && !(state.popup.open && state.popup.paintKitMode)
             && !state.multiSelectOpen
-            && !state.colorPickerOpen
-            && !configPopoverOpen
-            && !styleSelect.open
-            && !searchOpen
-            && !state.profileOpen)
+            && !state.colorPickerOpen)
             scrollTarget = ImClamp(scrollTarget - ImGui::GetIO().MouseWheel * 40.0f, 0.0f, maxScroll);
         if (scrollTarget > maxScroll)
             scrollTarget = maxScroll;
@@ -7858,12 +7812,8 @@ void neverlose::render() noexcept
         
         
         
-        // featureBindOpen and searchOpen own their capture-aware Escape handlers
-        // below - they must count as open layers here or Escape would hide the
-        // whole menu in the same frame it closes them.
         const bool hadLayerOpen = state.popup.open || state.multiSelectOpen || state.colorPickerOpen
-            || styleSelect.open || configPopoverOpen || state.profileOpen
-            || state.featureBindOpen || searchOpen;
+            || styleSelect.open || configPopoverOpen || state.profileOpen;
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)
             && state.capture == State::Capture::Inactive
             && state.editingSlider < 0) {
@@ -9685,9 +9635,6 @@ void drawNowPlayingWindow(float combatListHeight) noexcept
 
 float drawCombatCountersWindow() noexcept
 {
-    if (!ui_config::get<combat_stats_vars::CountersEnabled>())
-        return 0.0f;
-
     if (!combat_stats_hud::hudLive.load(std::memory_order_relaxed))
         return 0.0f;
     const auto snap = combat_stats_hud::snapshot();
@@ -9763,8 +9710,6 @@ float drawCombatCountersWindow() noexcept
 float drawStatusChipsWindow() noexcept
 {
     if (!combat_stats_hud::hudLive.load(std::memory_order_relaxed))
-        return 0.0f;
-    if (!ui_config::get<status_panel_vars::Enabled>())
         return 0.0f;
 
     constexpr ImU32 kHeldGreen = C(163, 212, 31);
@@ -10017,8 +9962,6 @@ float drawHitFeedWindow() noexcept
 {
     if (!combat_stats_hud::hudLive.load(std::memory_order_relaxed))
         return 0.0f;
-    if (!ui_config::get<combat_stats_vars::FeedEnabled>())
-        return 0.0f;
     const auto snap = combat_stats_hud::snapshot();
     const float lifetime = static_cast<float>(ui_config::get<combat_stats_vars::FeedLifetime>());
     const double now = hudMonotonicSeconds();
@@ -10159,11 +10102,8 @@ void drawPlayerListWindow() noexcept
 
         
         ImGui::PushStyleColor(ImGuiCol_Text, C(137, 142, 153));
-        // Pop the header color outside the if: BeginTable can fail, and a pop
-        // that only runs on success leaks one pushed color per frame.
-        const bool tableOpen = ImGui::BeginTable("##player_list_rows", 8,
-                ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit);
-        if (tableOpen) {
+        if (ImGui::BeginTable("##player_list_rows", 8,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
             ImGui::TableSetupColumn("Name");
             ImGui::TableSetupColumn("Team");
             ImGui::TableSetupColumn("Health");
@@ -10173,10 +10113,7 @@ void drawPlayerListWindow() noexcept
             ImGui::TableSetupColumn("TD");
             ImGui::TableSetupColumn("Status");
             ImGui::TableHeadersRow();
-        }
-        ImGui::PopStyleColor();
-
-        if (tableOpen) {
+            ImGui::PopStyleColor();
 
             
             
@@ -10311,7 +10248,7 @@ bool avatarLoadAttempted = false;
     if (!pixels)
         return false;
 
-    // No success log here - the gui.log is anomaly-only (a healthy session is silent).
+    gui_log::write("avatar staged: %s (%dx%d)", path, width, height);
     if (music)
         VulkanHook::music_texture::request(pixels, width, height);
     else
