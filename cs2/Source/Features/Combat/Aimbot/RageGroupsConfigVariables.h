@@ -6,16 +6,14 @@
 #include <GameClient/Bind.h>
 #include <Features/Combat/Aimbot/RageWeaponDefs.h>
 
-// Per-weapon-group rage config (velocity-cs2 settings.hpp ragebot::weapon_group
-// structure, our config idioms). One type per (group, field) so every value is a
-// distinct ConfigVariable with its own storage, load/save, and bind entry. The
-// Field tag types keep template aliases distinct: without them Enabled<G> and
-// HitHead<G> (same value/default) would collapse into one type and one slot.
+// per-weapon-group rage config. one type per (group, field) so every value is
+// a distinct ConfigVariable with its own storage/load/save/bind entry; the
+// Field tag types keep the aliases distinct (else Enabled<G> and HitHead<G>
+// collapse into one type and one slot).
 //
-// Groups are selected at runtime from the active weapon's VData
-// (CCSWeaponBaseVData/m_WeaponType, schema-by-name): pistol=1 smg=2 rifle=3
-// shotgun=4 sniper=5 lmg=6. Non-gun weapons (knife/grenade/C4/...) resolve to no
-// group and the ragebot stands down for them.
+// group comes from the active weapon's VData (m_WeaponType): pistol=1 smg=2
+// rifle=3 shotgun=4 sniper=5 lmg=6. non-gun weapons resolve to no group and
+// the ragebot stands down.
 
 namespace rage_groups
 {
@@ -28,8 +26,8 @@ struct Sniper {};
 struct Lmg {};
 
 struct EnabledField {};
-// Specific-weapon override switch (RageWeaponDefs.h tags): when set, the weapon's
-// own config replaces its weapon-type group's for the active resolution.
+// specific-weapon override: when set, the weapon's own config (RageWeaponDefs.h)
+// replaces its weapon-type group's for the active resolution.
 struct OverrideEnabledField {};
 struct MultipointField {};
 struct PointScaleField {};
@@ -66,8 +64,7 @@ using Enabled = GroupBoolVariable<Group, EnabledField, true>;
 template <typename Group>
 using OverrideEnabled = GroupBoolVariable<Group, OverrideEnabledField, false>;
 
-// Multipoint defaults ON (2026-10-13 friend report "scout has no multipoint at
-// all"): off-by-default left every group locked to the single hitbox center.
+// defaults ON; off-by-default locked every group to the single hitbox center.
 template <typename Group>
 using Multipoint = GroupBoolVariable<Group, MultipointField, true>;
 
@@ -92,8 +89,8 @@ using Hitchance = GroupRangeVariable<Group, HitchanceField, std::uint8_t, 0, 100
 template <typename Group>
 using MinDamage = GroupRangeVariable<Group, MinDamageField, std::uint8_t, 0, 200, 0>;
 
-// Hold-bind: while held the group's min damage becomes MinDamageOverrideValue
-// (velocity's min_damage_override + value, default 11).
+// hold-bind: while held the group's min damage becomes MinDamageOverrideValue
+// (default 11).
 template <typename Group>
 using MinDamageOverrideKey = GroupRangeVariable<Group, MinDamageOverrideKeyField, std::uint8_t, 0, static_cast<std::uint8_t>(Bind::kLast), Bind::kOff>;
 

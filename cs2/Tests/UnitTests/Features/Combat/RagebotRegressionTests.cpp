@@ -327,9 +327,8 @@ TEST(RageGroups, MapWeaponTypeToGroupIndex)
     EXPECT_EQ(rage_groups::groupIndexForWeaponType(9), -1);   // grenade
 }
 
-// Every (group, field) alias must be a DISTINCT type: template aliases collapse
-// (Enabled<G> vs HitHead<G> share GroupBoolVariable<G, true>) and a collapsed
-// pair silently merges two config keys into one storage slot.
+// every (group, field) alias must be a DISTINCT type: template aliases collapse
+// and a collapsed pair merges two config keys into one storage slot.
 TEST(RageGroups, FieldAliasesAreDistinctTypes)
 {
     using namespace rage_groups;
@@ -422,9 +421,8 @@ TEST(RageDoubleTap, StampsAllHistoryEntriesAtNextAttackTick)
 
 #include <Features/Combat/Aimbot/RageWeaponDefs.h>
 
-// The per-weapon list is generated from the game's own items_game.txt - spot-check
-// the def-index anchors the generator itself asserts (they are the stable, known
-// CS:GO-era indices; a drift here means a regen is needed, not a code fix).
+// per-weapon list generated from items_game.txt; a def-index drift here
+// means regen, not a code fix.
 TEST(RageWeaponDefs, TableCarriesTheStableDefIndexAnchors)
 {
     EXPECT_EQ(rage_weapons::kCount, 32);
@@ -440,10 +438,8 @@ TEST(RageWeaponDefs, TableCarriesTheStableDefIndexAnchors)
     EXPECT_STREQ(find(1), "Desert Eagle");
 }
 
-// Every (weapon, field) must be a distinct config variable with a distinct type:
-// a weapon's OverrideEnabled must never collapse with its group's Enabled or with
-// another weapon's field (same field-tag aliases collapse across groups - the
-// Field tag types are what keep them apart).
+// every (weapon, field) must be a distinct type: same field-tag aliases collapse
+// across groups, the Field tag types keep them apart.
 TEST(RageWeaponDefs, PerWeaponAliasesAreDistinctAndRegistered)
 {
     using namespace rage_groups;

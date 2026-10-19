@@ -70,6 +70,51 @@ public:
         setOuterHasBit(cs2::CUserCmd::kBaseMessageHasBit);
     }
 
+    // Raw QAngle triple save/restore. The anti-aim writes its fake angles into
+    // the command at WriteMoveCrc (the move-CRC-covered point - angles written
+    // later, at CreateMove, never reach the server because the CRC was already
+    // computed). The engine serializes + CRCs the command inside the original
+    // WriteMoveCrc call, so restoring the real angles AFTER that call keeps the
+    // local view decoupled from the fakes that just went into the packet
+    // (velocity's handle_view_angles save/restore, anchored at our CRC hook).
+    struct RawViewAngles {
+        float pitch;
+        float yaw;
+        float roll;
+    };
+
+    [[nodiscard]] Optional<RawViewAngles> readRawViewAngles() const noexcept
+    {
+        const auto base = baseMessage();
+        if (!base)
+            return {};
+        std::byte* angles = nullptr;
+        std::memcpy(&angles, base + cs2::CUserCmd::BaseMessage::kViewAnglesOffset, sizeof(angles));
+        if (!angles)
+            return {};
+        RawViewAngles raw{};
+        std::memcpy(&raw.pitch, angles + cs2::CUserCmd::BaseMessage::ViewAngles::kPitchOffset, sizeof(raw.pitch));
+        std::memcpy(&raw.yaw, angles + cs2::CUserCmd::BaseMessage::ViewAngles::kYawOffset, sizeof(raw.yaw));
+        std::memcpy(&raw.roll, angles + cs2::CUserCmd::BaseMessage::ViewAngles::kRollOffset, sizeof(raw.roll));
+        return raw;
+    }
+
+    void restoreRawViewAngles(const RawViewAngles& raw) const noexcept
+    {
+        const auto base = baseMessage();
+        if (!base)
+            return;
+        std::byte* angles = nullptr;
+        std::memcpy(&angles, base + cs2::CUserCmd::BaseMessage::kViewAnglesOffset, sizeof(angles));
+        if (!angles)
+            return;
+        // Pure value restore - the presence bits are already set from the
+        // original write, only the serialized scalars come back.
+        std::memcpy(angles + cs2::CUserCmd::BaseMessage::ViewAngles::kPitchOffset, &raw.pitch, sizeof(raw.pitch));
+        std::memcpy(angles + cs2::CUserCmd::BaseMessage::ViewAngles::kYawOffset, &raw.yaw, sizeof(raw.yaw));
+        std::memcpy(angles + cs2::CUserCmd::BaseMessage::ViewAngles::kRollOffset, &raw.roll, sizeof(raw.roll));
+    }
+
     
     
     [[nodiscard]] Optional<float> forwardMove() const noexcept

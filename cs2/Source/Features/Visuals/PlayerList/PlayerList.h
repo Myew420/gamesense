@@ -72,21 +72,13 @@ public:
         player_list::Row rows[player_list::kMaxRows];
         int rowSlot = 0;
 
-        
-        
-        
-        int chainEntities = 0;
-        int chainControllers = 0;
-
         hookContext.template make<EntitySystem>().forEachNetworkableEntityIdentity([&](const auto& entityIdentity) {
-            ++chainEntities;
             if (rowSlot >= player_list::kMaxRows)
                 return;
 
             const auto entityTypeInfo = hookContext.entityClassifier().classifyEntity(entityIdentity.entityClass);
             if (!entityTypeInfo.template is<cs2::CCSPlayerController>())
                 return;
-            ++chainControllers;
 
             auto&& controller = hookContext.template make<PlayerController>(static_cast<cs2::CCSPlayerController*>(entityIdentity.entity));
             auto* const controllerEntity = static_cast<cs2::C_BaseEntity*>(entityIdentity.entity);
@@ -168,19 +160,6 @@ public:
         }
 
         player_list::publish(rows, rowSlot);
-
-        
-        {
-            static std::int64_t lastDiagNs = 0;
-            timespec ts{};
-            clock_gettime(CLOCK_MONOTONIC, &ts);
-            const std::int64_t nowNs = static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
-            if (lastDiagNs == 0 || nowNs - lastDiagNs > 10'000'000'000LL) {
-                lastDiagNs = nowNs;
-                gui_log::write("[chaindiag] plist: classifierInit=%d identities=%d controllers=%d rows=%d",
-                    hookContext.entityClassifier().initialized() ? 1 : 0, chainEntities, chainControllers, rowSlot);
-            }
-        }
     }
 
 private:

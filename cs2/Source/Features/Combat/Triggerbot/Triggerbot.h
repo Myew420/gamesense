@@ -83,11 +83,8 @@ public:
     
     void onWriteMoveCrc(cs2::CUserCmd* cmd) const noexcept
     {
-        // Activation: Hold = active while the key is down; Toggle = a press
-        // flips the latch (PanicKey's rising-edge shape). The latch update runs
-        // every user command BEFORE any early-out so the edge detector never
-        // misses a release, and can't be re-flipped by a mid-press panic: an
-        // unbound key or the master toggle off drops the latch.
+        // hold = active while key down; toggle = rising-edge latch. latch
+        // update runs before any early-out so a release is never missed.
         const bool enabled = GET_CONFIG_VAR(triggerbot_vars::Enabled);
         const bool toggleMode = GET_CONFIG_VAR(triggerbot_vars::KeyMode) != 0;
         const bool keyDown = Bind::isDown(GET_CONFIG_VAR(triggerbot_vars::HoldKey));
@@ -102,9 +99,6 @@ public:
         triggerbot_state::lastKeyWasDown = keyDown;
 
         if (!enabled || !(toggleMode ? triggerbot_state::latched : keyDown)) {
-            // Breadcrumb (friend report "toggle ON on target, nothing happens"):
-            // HOLD mode fires only while the key is DOWN (default middle click),
-            // TOGGLE latches on press. This line names which one blocked.
             if (enabled)
             disarm();
             return;
@@ -126,19 +120,15 @@ public:
         }
         lastSeenCurtime = now.value();
 
-        // Target selection, the reference legitbot's three routes in order: the direct
-        // crosshair pawn, then (only when the crosshair found nothing) the through-wall
-        // scan and the backtrack ghost scan. All three feed the same arm/delay/fire
-        // machinery below; scan targets carry their own resolved point + hitgroup and
-        // skip the direct-only gates.
+        // target routes in order: direct crosshair pawn, then (only if the
+        // crosshair found nothing) the through-wall scan, then the backtrack
+        // ghost. scan targets carry their own resolved point + hitgroup.
         ScanTarget selection{};
         if (const auto direct = crosshairTarget()) {
             selection.pawn = direct.rawPawn();
         } else {
             const auto scanned = scanTarget(cmd);
             if (!scanned.hasValue()) {
-                // Breadcrumb: name the crosshair index so "on target but no
-                // fire" reports show whether the game trace even sees it.
                 disarm();
                 return;
             }
@@ -151,8 +141,8 @@ public:
             armed = true;
             armedTarget = rawTarget;
             firedAtTarget = false;
-            // Aim time (friend request): the crosshair must HOLD on this target
-            // for AimTimeMs before the reaction delay even begins to roll.
+            // crosshair must hold on this target for AimTimeMs before the
+            // reaction delay starts.
             const float aimTime = static_cast<float>(GET_CONFIG_VAR(triggerbot_vars::AimTimeMs)) / 1000.0f;
             const float delay = delaySeconds();
             fireAtTime = now.value() + humanizeDelay(aimTime + delay);
@@ -162,10 +152,8 @@ public:
         if (now.value() < fireAtTime)
             return;
 
-        // Rapid refire (friend request "automatic pistols"): the FIRST shot at a
-        // target runs the full gates; shots after it just click - semi-autos keep
-        // firing at weapon speed while held on target, no per-shot inaccuracy
-        // stall (the "slow / sometimes not shooting" report).
+        // first shot at a target runs the full gates; refires skip them so
+        // semi-autos keep firing at weapon speed while held on target.
         if (!GET_CONFIG_VAR(triggerbot_vars::AutoRefire) || !firedAtTarget) {
             if (!wouldShotLand(target)) {
                 return;
@@ -175,17 +163,14 @@ public:
             }
         }
         if (selection.fromBacktrack) {
-            // A backtrack ghost: the direct trace already failed by construction, so the
-            // visibility/hitchance/seeded gates on the LIVE pose are the wrong question -
-            // the record's own hitgroup carries the bone decision and the arm/delay
-            // logic above already re-armed per target.
+            // backtrack ghost: the direct trace already failed; the live-pose
+            // gates are the wrong question, the record's own hitgroup decides.
             if (!hitgroupWanted(selection.hitgroup, wantedHitboxes())) {
                 return;
             }
         } else if (selection.throughWall) {
-            // A through-wall target: the scan already damage-checked the bone point; this
-            // re-checks the actual fire direction (the crosshair) penetrates for enough
-            // damage - the shot the spread-compensated writer will actually send.
+            // through-wall: the scan already damage-checked the bone point;
+            // re-check the crosshair direction penetrates for enough damage.
             if (!passesVisibility(target, cmd)) {
                 return;
             }
@@ -204,13 +189,10 @@ public:
             }
         }
 
-        // The shot goes out.
         if (!hookContext.template make<AttackCommand>().press(cmd))
             return;
         firedAtTarget = true;
-        // Refire pause (friend request "delay for pistols like Dual Berettas"):
-        // space subsequent shots at the same target; the first shot above ran
-        // after AimTime + reaction delay, this only paces the follow-ups.
+        // refire delay paces follow-up shots at the same target.
         const float refireDelay = static_cast<float>(GET_CONFIG_VAR(triggerbot_vars::RefireDelayMs)) / 1000.0f;
         if (refireDelay > 0.0f)
             fireAtTime = now.value() + humanizeDelay(refireDelay);
@@ -257,9 +239,8 @@ public:
     }
 
 private:
-    // A target resolved by one of the fallback scans (through-wall or backtrack) instead of
-    // the direct crosshair trace. `point`/`hitgroup` are the scan's own resolution - the
-    // reference legitbot's ScanTargetThroughWall / ScanBacktrackTarget results.
+    // resolved by a fallback scan (through-wall or backtrack), not the direct
+    // crosshair trace. point/hitgroup are the scan's own resolution.
     struct ScanTarget {
         cs2::C_CSPlayerPawn* pawn{};
         cs2::Vector point{};
@@ -281,9 +262,8 @@ private:
             GET_CONFIG_VAR(triggerbot_vars::HitLegs) != false};
     }
 
-    // The hitbox the crosshair ray actually lands on (deadlocked gates on the
-    // game's own crosshair trace alone; we resolve WHICH hitbox so the group
-    // selection and the hitchance sampler both run against what we'd hit).
+    // the hitbox the crosshair ray actually lands on, so group selection and
+    // the hitchance sampler run against what we'd hit.
     struct MatchedHitbox {
         hitbox_geometry::Shape shape;
         int hitgroup;
@@ -292,19 +272,16 @@ private:
         float fallbackRadius{0.0f};
     };
 
-    // The real hitgroup mapping (the shared Hitboxes helper - Lagcomp records
-    // and this gate agree by construction): 1 head, 2 chest, 3 stomach,
-    // 4|5 arms, 6|7 legs, 8 gear not selectable.
+    // hitgroup map: 1 head, 2 chest, 3 stomach, 4|5 arms, 6|7 legs, 8 gear.
     [[nodiscard]] static bool hitgroupWanted(int hitgroup, const HitboxWants& wants) noexcept
     {
         return Hitboxes::hitgroupWantedBySelection(hitgroup, wants.head, wants.chest, wants.stomach, wants.arms, wants.legs);
     }
 
 
-    // The reference legitbot's fallback selection, tried in its order: the through-wall scan
-    // (crosshair on world geometry - fire at the closest-to-crosshair enemy hitbox that
-    // still takes >= MinDamage through the wall), then the backtrack ghost (the crosshair
-    // crossing an enemy's past position - the server's lag compensation lands the shot).
+    // fallback order: through-wall scan (closest-to-crosshair enemy hitbox
+    // that still takes >= MinDamage through the wall), then the backtrack
+    // ghost (crosshair on an enemy's past position; server lag comp lands it).
     [[nodiscard]] Optional<ScanTarget> scanTarget(cs2::CUserCmd* cmd) const noexcept
     {
         if (GET_CONFIG_VAR(triggerbot_vars::ThroughWalls))
@@ -368,10 +345,9 @@ private:
             static constexpr int kHitgroups[]{1, 2, 3};
             auto&& node = enemy.baseEntity().gameSceneNode();
 
-            // The real hitbox chain: scan the game's own hitbox set (true
-            // centers, true hitgroups) instead of guessed bone points - the
-            // same data the aimbot uses. Falls back to the old bone loop when
-            // the chain is stale so the scan degrades, not disappears.
+            // scan the game's own hitbox set (true centers, true hitgroups),
+            // same data the aimbot uses. falls back to the old bone loop when
+            // the chain is stale.
             const auto hitboxSet = Hitboxes::query(node.raw());
             const int scanCount = hitboxSet.count > 0 ? hitboxSet.count : 3;
             for (int b = 0; b < scanCount; ++b) {
@@ -451,9 +427,8 @@ private:
             if (!enemy || enemy.isControlledByLocalPlayer() || enemy.isEnemy() != true || enemy.isAlive() != true)
                 return;
 
-            // The record's REAL hitbox shape (model extents + the record's own
-            // bone snapshot): the crosshair ray must cross the true capsule,
-            // not an invented radius sphere (2026-10-15 audit item).
+            // the crosshair ray must cross the true capsule (model extents +
+            // the record's bone snapshot), not an invented radius sphere.
             const auto record = lagcomp.bestRecord(static_cast<cs2::C_BaseEntity*>(enemy.baseEntity()), eye.value(), pitch.value(), yaw.value(),
                                                    wants.head, wants.chest, wants.stomach, wants.arms, wants.legs, maxTicks);
             if (!record.hasValue())
@@ -575,14 +550,8 @@ private:
         if (!eye.hasValue() || !pitch.hasValue() || !yaw.hasValue())
             return true;
 
-        // Every selected hitgroup gates through the real hitbox chain, and
-        // the hitchance sampler runs against THE HITBOX UNDER THE CROSSHAIR.
-        // (2026-10-15 friend report "legs/arms never fire, stomach
-        // intermittent": the previous revision evaluated hitchance against
-        // the PRIMARY group's hitbox - the head whenever head was selected -
-        // so any body crosshair at hc>0 sampled vs the tiny head sphere and
-        // read 0%. Deadlocked's triggerbot has no hitchance at all; when set,
-        // it must measure what the crosshair actually points at.)
+        // gate on the hitbox under the crosshair; hitchance must sample what
+        // the crosshair actually points at, not the primary group's hitbox.
         const auto matched = onSelectedBones(target, eye.value(), pitch.value(), yaw.value(), wants);
         if (!matched.hasValue()) {
             return false;
@@ -731,20 +700,15 @@ private:
         const auto armorRatio = weapon.armorRatio();
         const auto headMultiplier = weapon.headshotMultiplier();
         if (!armorRatio.hasValue() || !headMultiplier.hasValue()) return false;
-        // The min-damage gate (the reference's triggerbot_md): the shot along the crosshair
-        // must leave the target at <= (health - MinDamage), not merely deal any damage.
+        // min-damage gate: the shot must leave the target at <= health - MinDamage.
         const float minDamage = static_cast<float>(GET_CONFIG_VAR(triggerbot_vars::MinDamage));
         return Autowall::healthDamage(hookContext, targetEntity, impact.value().damage, impact.value().hitgroup,
             armorRatio.value(), headMultiplier.value()).valueOr(0.0f) >= (minDamage > 1.0f ? minDamage : 1.0f);
     }
 
 
-    // Bone selection (friend request), on the REAL hitbox chain (2026-10-15
-    // "hitbox system" audit): the game's own hitbox set with true capsules -
-    // the same data the aimbot's multipoint uses, so Aim and Triggerbot agree.
-    // The old hardcoded path gated on bone 6, which the live-verified chain
-    // showed to be the NECK (the head hitbox remaps to bone 7) - the "only
-    // shoots if crosshair is on one point of the head" report.
+    // bone selection on the game's own hitbox set (same data the aimbot's
+    // multipoint uses). bone 6 is the NECK; the head hitbox remaps to bone 7.
     [[nodiscard]] Optional<MatchedHitbox> onSelectedBones(auto&& target, const cs2::Vector& eye, float pitch, float yaw,
         const HitboxWants& wants) const noexcept
     {
@@ -764,8 +728,8 @@ private:
             return {};
         }
 
-        // Chain dead (update drift class): telemetry + the old sphere
-        // approximation so the trigger degrades instead of vanishing.
+        // chain dead: sphere approximation fallback so the trigger degrades
+        // instead of vanishing.
         static constexpr int kBones[]{kHeadBone, kChestBone, kStomachBone};
         static constexpr int kHitgroups[]{1, 2, 3};
         static constexpr float kRadii[]{kHeadRadius, kBodyRadius, kBodyRadius};
@@ -782,8 +746,8 @@ private:
         return {};
     }
 
-    // World-space shape of one real hitbox entry: the bone transform (the
-    // game's live interpolated skeleton cache) + the hitbox's own extents.
+    // world-space shape of one hitbox entry: bone transform from the live
+    // skeleton cache + the hitbox's own extents.
     [[nodiscard]] Optional<hitbox_geometry::Shape> worldHitboxShape(auto&& node, const Hitboxes::Entry& entry) const noexcept
     {
         const auto transform = node.boneTransform(entry.bone);
@@ -800,11 +764,9 @@ private:
     
     
     
-    // Hitchance is evaluated against the highest-priority SELECTED bone (head
-    // if selected, else chest, else stomach) - matches which shot we'd send.
-    // Hitchance sampled against the hitbox under the crosshair (the true
-    // capsule/box shape, not the primary group's): the spread cone must land
-    // threshold% of its samples inside what we are actually about to hit.
+    // hitchance sampled against the hitbox under the crosshair (the true
+    // capsule/box shape): threshold% of the spread cone's samples must land
+    // inside what we are about to hit.
     [[nodiscard]] bool passesHitchanceOn(auto&& localPawn, const cs2::Vector& eye,
         const MatchedHitbox& matched, int thresholdPercent) const noexcept
     {
@@ -816,9 +778,8 @@ private:
         const cs2::Vector aimPoint = matched.fromFallback ? matched.fallbackAim : matched.shape.center();
         const float radius = matched.fromFallback ? matched.fallbackRadius : matched.shape.radius;
 
-        // Sample the spread cone in a basis oriented at the aim point: the
-        // cone's spread offset is perpendicular noise around the aim
-        // direction (matching the shot writer's spread model).
+        // sample the spread cone in a basis oriented at the aim point
+        // (matches the shot writer's spread model).
         const auto aimAngles = shot_geometry::anglesTo(eye, aimPoint);
         const auto basis = shot_geometry::angleVectors(aimAngles.pitch, aimAngles.yaw);
 
@@ -869,9 +830,8 @@ private:
         return static_cast<float>(chosen) / 1000.0f;
     }
 
-    // Delay humanizer (friend request): every rolled delay (reaction, refire
-    // pause, aim time) gets a random 0.75..1.25 multiplier so the click rhythm
-    // isn't a metronome. Off = the configured delays verbatim.
+    // every rolled delay (reaction, refire, aim time) gets a random
+    // 0.75..1.25 multiplier so the click rhythm isn't a metronome.
     [[nodiscard]] float humanizeDelay(float seconds) const noexcept
     {
         if (!GET_CONFIG_VAR(triggerbot_vars::HumanizeDelays) || seconds <= 0.0f)
@@ -950,8 +910,8 @@ private:
     inline static bool armed{false};
     inline static cs2::C_BaseEntity* armedTarget{nullptr};
     inline static float fireAtTime{0.0f};
-    // Set after a shot goes out at the armed target: AutoRefire's subsequent
-    // shots skip the accuracy gates (see the fire block).
+    // set after a shot at the armed target; AutoRefire's refires skip the
+    // accuracy gates.
     inline static bool firedAtTarget{false};
 
     

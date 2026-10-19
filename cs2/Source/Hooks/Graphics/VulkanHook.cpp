@@ -144,6 +144,7 @@ VkDescriptorPool retiredDescriptorPools[kMaxFrames]{};
 std::size_t retiredCount = 0;
 bool renderTargetsCreated = false;
 bool rendererInitialized = false;
+VkFormat rendererInitializedFormat = VK_FORMAT_UNDEFINED;
 VkExtent2D swapchainExtent{};                            
 VkFormat swapchainFormatCaptured = VK_FORMAT_UNDEFINED;  
 
@@ -694,6 +695,20 @@ VkResult VKAPI_CALL hkCreateSwapchainKHR(VkDevice device, const VkSwapchainCreat
                 : nullptr)
             waitIdle(device);
         cleanupRenderTargets(device);
+        // A mode change (fullscreen <-> windowed) can hand us a swapchain with
+        // a DIFFERENT image format. The ImGui renderer's pipeline is bound to
+        // the render pass it was initialized with; with a new format the
+        // recreated framebuffers are render-pass-INCOMPATIBLE with that
+        // pipeline and every draw comes out washed-out gray. Rebuild the whole
+        // renderer against the new format - NewFrame re-uploads the font
+        // atlas on the next pass.
+        if (rendererInitialized && pCreateInfo
+            && pCreateInfo->imageFormat != rendererInitializedFormat) {
+            gui_log::write("hook: swapchain format changed %d -> %d - rebuilding the ImGui renderer",
+                static_cast<int>(rendererInitializedFormat), static_cast<int>(pCreateInfo->imageFormat));
+            ImGui_ImplVulkan_Shutdown();
+            rendererInitialized = false;
+        }
     }
     swapchainExtent = pCreateInfo ? pCreateInfo->imageExtent : VkExtent2D{};
     
@@ -1519,6 +1534,7 @@ void cleanupRenderTargets(VkDevice device) noexcept
             initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
             initInfo.RenderPass = renderPass;
             rendererInitialized = ImGui_ImplVulkan_Init(&initInfo);
+            rendererInitializedFormat = rendererInitialized ? swapchainFormat() : VK_FORMAT_UNDEFINED;
             if (!rendererInitialized) {
                 StatusReport::record("VulkanHook: ImGui_ImplVulkan_Init failed", false);
                 gui_log::write("hook: ImGui_ImplVulkan_Init FAILED");

@@ -16,10 +16,9 @@
 #include <Utils/Optional.h>
 #include <Utils/Trig.h>
 
-// Saved-throw grenade aim (deadlocked's design, 2026-10-15 port): while
-// holding a live grenade, aim at the recorded view angles of the CLOSEST
-// saved throw of the SAME weapon on the current map. The throw physics is
-// untouched - SuperToss still corrects the release; this only steers.
+// saved-throw grenade aim: while holding a live grenade, aim at the recorded
+// angles of the closest saved throw of the same weapon on the current map.
+// throw physics untouched; this only steers.
 template <typename HookContext>
 class GrenadeAim {
 public:
@@ -47,10 +46,8 @@ public:
         if (!weaponEntity)
             return;
 
-        // In-hand grenade test: the throw-strength field exists only on
-        // C_BaseCSGrenade, and m_fThrowTime > 0 only while the pin is pulled
-        // / throwing - never in the idle hand, so the aim must not fight
-        // normal play (deadlocked checks WeaponClass == Grenade).
+        // m_flThrowStrength exists only on C_BaseCSGrenade; m_fThrowTime > 0 only
+        // while the pin is pulled/throwing, never in the idle hand
         const auto throwStrength = grenadeSchemaFloat(weaponEntity, "m_flThrowStrength");
         if (!throwStrength.hasValue() || throwStrength.value() < 0.0f || throwStrength.value() > 1.0f)
             return;
@@ -123,9 +120,8 @@ private:
 
     [[nodiscard]] Optional<float> grenadeSchemaFloat(cs2::C_BaseEntity* entity, const char* field) const noexcept
     {
-        // Both m_flThrowStrength and m_fThrowTime are C_BaseCSGrenade fields
-        // (schema-resolved; the field only exists on grenade weapons, so a
-        // non-grenade resolves empty and the caller stands down).
+        // C_BaseCSGrenade fields only: a non-grenade resolves empty and the
+        // caller stands down
         const auto offset = hookContext.schemaSystem().getFieldOffset("C_BaseCSGrenade", field);
         if (!offset.has_value() || *offset <= 0)
             return {};

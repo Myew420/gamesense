@@ -135,9 +135,8 @@ namespace fva
 
 
 
-// alwaysPublish: the target must chain on EVERY tick, not only fire ticks -
-// the anti-aim rides this channel (its angles must reach the server's eye
-// reconstruction each command; FvaChainOnFireOnly must not gate it out).
+// alwaysPublish: chain on every tick, not only fire ticks (anti-aim angles must
+// reach the server every command; FvaChainOnFireOnly must not gate it out)
 inline void setTargetAngle(float pitch, float yaw, bool alwaysPublish = false) noexcept
 {
     fva_target::pitchBits.store(fva_target::bitCasted(pitch), std::memory_order_relaxed);
@@ -166,10 +165,8 @@ public:
     
     void onCreateMove(cs2::CUserCmd* cmd) noexcept
     {
-        // 2026-10-13: armed targets (the anti-aim arms with alwaysPublish)
-        // are consumed EVEN WITH the FVA feature toggle off - the AA must not
-        // require the user to enable FVA. Everything else (reference chain,
-        // zero-origin spoof, fire-only gating) stays behind FvaEnabled.
+        // armed targets are consumed even with the FVA toggle off (anti-aim must
+        // not require FvaEnabled); everything else stays behind FvaEnabled
         if (!GET_CONFIG_VAR(FvaEnabled)
             && !fva_target::armed.load(std::memory_order_acquire))
             return;
@@ -301,10 +298,8 @@ private:
     
     void publishStaged(cs2::CUserCmd* cmd) noexcept
     {
-        // No FvaEnabled gate: chains are staged ONLY when the emulator ran
-        // (FvaEnabled or an armed AA target), so stagedCount > 0 here always
-        // means "deliver" - including the AA's alwaysPublish chains with the
-        // FVA toggle off (2026-10-13).
+        // no FvaEnabled gate: chains are staged only when the emulator ran, so
+        // stagedCount > 0 here always means deliver
         if (stagedCount == 0)
             return;
 

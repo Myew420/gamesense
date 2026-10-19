@@ -17,9 +17,7 @@
 namespace overlay_layer
 {
 
-// Producer side (game thread) publishes raw data; renderGameOverlay draws it.
-// The old per-frame producer for Arrow was removed with the velocity-ESP tab;
-// the struct is repurposed for the off-screen enemy arrows feature.
+// game thread publishes raw data; renderGameOverlay draws it.
 
 struct Arrow {
     float xPercent;   // projected enemy head position, percent of screen width (may be off-screen)
@@ -33,16 +31,11 @@ inline SpinLock lock;
 inline Arrow arrows[kMaxArrows];
 inline int arrowCount = 0;
 
-// Bullet tracers are IN-GAME (the weapon's own tracer particle system spawned
-// via the game's fx primitive - see Features/Visuals/BulletTracers): they are
-// NOT overlay primitives and never pass through here.
+// in-game bullet tracers (Features/Visuals/BulletTracers) never pass through here.
 
-// Kill-effect lightning bolts: a strike from the SKY down to the victim's
-// death position. The producer projects the death spot AND the world point
-// straight above it (2500u up) and publishes both as screen percents; the
-// draw side converts to pixels, follows the base->sky direction (capped at
-// 1.5x screen height, clamped to never draw sideways/below - the floor-lines
-// bug class), and builds the jagged channel + forks there.
+// kill-effect bolts: producer publishes the death spot and the point 2500u
+// above it as screen percents; draw side follows base->sky (capped at 1.5x
+// screen height, never sideways/below) and builds the channel + forks.
 struct Bolt {
     float xPercent;       // strike point (victim death position)
     float yPercent;
@@ -118,9 +111,8 @@ inline void publishBolts(const Bolt* newBolts, int count) noexcept
 }
 
 
-// Bullet impact markers (Features/Visuals/BulletImpacts): world-space impact
-// points re-projected each frame; a dedicated channel so the whole-scene Esp
-// publisher (last-writer-wins) never races it.
+// impact markers (Features/Visuals/BulletImpacts): world-space points
+// re-projected each frame; own channel so the Esp publisher never races it.
 struct ImpactMarker {
     float xPercent;
     float yPercent;
@@ -147,6 +139,35 @@ inline void publishImpactMarkers(const ImpactMarker* newMarkers, int count) noex
 }
 
 
+// bullet tracers (Features/Visuals/BulletTracers): muzzle->impact beams, short lifetime.
+struct TracerBeam {
+    float startXPercent;
+    float startYPercent;
+    float endXPercent;
+    float endYPercent;
+    std::uint32_t rgba;
+};
+
+constexpr int kMaxTracerBeams = 16;
+
+inline SpinLock tracerBeamLock;
+inline TracerBeam tracerBeams[kMaxTracerBeams];
+inline int tracerBeamCount = 0;
+
+inline void publishTracerBeams(const TracerBeam* newBeams, int count) noexcept
+{
+    if (count < 0)
+        count = 0;
+    if (count > kMaxTracerBeams)
+        count = kMaxTracerBeams;
+    const std::lock_guard guard{tracerBeamLock};
+    if (newBeams)
+        for (int i = 0; i < count; ++i)
+            tracerBeams[i] = newBeams[i];
+    tracerBeamCount = count;
+}
+
+
 inline void publishHitmarker(const Hitmarker& newHitmarker) noexcept
 {
     const std::lock_guard guard{hitmarkerLock};
@@ -155,10 +176,8 @@ inline void publishHitmarker(const Hitmarker& newHitmarker) noexcept
 }
 
 
-// Rage multipoint scan cloud (velocity's debug multipoints): the game thread
-// (CreateMove) publishes the generated scan points projected to screen percents;
-// renderGameOverlay draws filled circles colored per hitbox group, center
-// points larger. Producer: Features/Combat/Aimbot (Aimbot::refineMultipointCapsule).
+// multipoint scan cloud: CreateMove publishes the generated scan points
+// projected to screen percents. producer: Features/Combat/Aimbot.
 struct MultiPoint {
     float xPercent;
     float yPercent;
@@ -182,10 +201,8 @@ inline void publishMultiPoints(const MultiPoint* newPoints, int count) noexcept
     multiPointCount = count;
 }
 
-// Anti-aim direction indicator (velocity misc.cpp on_render): the game thread
-// publishes the arc points (feet-centered 60 degree sweep at the AA yaw,
-// projected to screen percents, fade baked into rgba); renderGameOverlay draws
-// the tapering polyline. Producer: Features/Combat/AntiAim.
+// aa direction indicator: feet-centered 60 degree arc at the AA yaw, fade
+// baked into rgba. producer: Features/Combat/AntiAim.
 struct AaArcPoint {
     float xPercent;
     float yPercent;
@@ -208,10 +225,8 @@ inline void publishAaArc(const AaArcPoint* newPoints, int count) noexcept
     aaArcPointCount = count;
 }
 
-// ---- ESP scene primitives (core ESP suite, Features/Visuals/Esp) ----
-// All coordinates are PERCENTS OF DISPLAY (xPercent/yPercent like Arrow);
-// the draw side converts with the current display size. rgba values carry
-// color::Rgba packing. Fixed-capacity: producers must respect the caps.
+// ESP scene primitives (Features/Visuals/Esp): coordinates are display
+// percents, rgba is color::Rgba packing, fixed-capacity.
 
 struct EspRect {
     float xPercent;         // box left
@@ -245,9 +260,7 @@ struct EspText {
     char text[32];
 };
 
-// Vertical bar (health/armor): fill rises from the bottom of the bar.
-// backupFill/backupRgba = the white damage-echo overlay (hzqst backup-health
-// animation; producer fades its alpha).
+// vertical bar: fill rises from the bottom; backupFill/backupRgba = damage echo.
 struct EspBar {
     float xPercent, yPercent;
     float wPx;              // width in PIXELS (constant bar width, not display percent)
@@ -258,9 +271,8 @@ struct EspBar {
     std::uint32_t backupRgba;
 };
 
-// Custom crosshair (vesta crosshair.cpp pieces): filled rects in
-// percent-of-display coordinates, reference-1920 px inputs scaled by the
-// producer. Penetration resolution bakes into rgba (producer side).
+// custom crosshair: filled rects in display percents; penetration result
+// bakes into rgba (producer side).
 struct CrosshairPiece {
     float xPercent, yPercent, wPercent, hPercent;
 };
@@ -419,6 +431,8 @@ struct Snapshot {
     GrenadeScene grenadeScene{};
     ImpactMarker impactMarkers[kMaxImpactMarkers];
     int impactMarkerCount = 0;
+    TracerBeam tracerBeams[kMaxTracerBeams];
+    int tracerBeamCount = 0;
 };
 
 [[nodiscard]] inline Snapshot snapshot() noexcept
@@ -452,10 +466,10 @@ struct Snapshot {
             s.impactMarkers[i] = impactMarkers[i];
     }
     {
-        const std::lock_guard impactMarkersGuard{impactMarkersLock};
-        s.impactMarkerCount = impactMarkerCount;
-        for (int i = 0; i < impactMarkerCount; ++i)
-            s.impactMarkers[i] = impactMarkers[i];
+        const std::lock_guard tracerBeamGuard{tracerBeamLock};
+        s.tracerBeamCount = tracerBeamCount;
+        for (int i = 0; i < tracerBeamCount; ++i)
+            s.tracerBeams[i] = tracerBeams[i];
     }
     {
         const std::lock_guard multiPointGuard{multiPointLock};

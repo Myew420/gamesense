@@ -1,10 +1,7 @@
-// Equipment icon names for the ImGui surfaces (inventory tab, player list rows).
-//
-// Source of truth: pak01_dir.vpk, panorama/images/icons/equipment/<name>.vsvg_c
-// (101 files, names re-verified against the CURRENT depot on 2026-10-10 - e.g. the
-// karambit icon is 'knife_karambit' (not 'karambit'), m9 is 'knife_m9_bayonet',
-// the classic knife is 'knife' and the default T knife is 'knife_t').
-// Rasterization: Utils/VpkIconLoader.h (nanosvg, vendored under ThirdParty/nanosvg).
+// equipment icon names for the ImGui surfaces (inventory tab, player list rows).
+// source: pak01_dir.vpk, panorama/images/icons/equipment/<name>.vsvg_c
+// (karambit = 'knife_karambit', classic knife = 'knife', default T knife = 'knife_t').
+// rasterized in Utils/VpkIconLoader.h (nanosvg, ThirdParty/nanosvg).
 #pragma once
 
 #include <cstdint>

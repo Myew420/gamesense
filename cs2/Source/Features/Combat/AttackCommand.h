@@ -20,15 +20,11 @@ public:
         const UserCmd userCmd{cmd};
         if (!userCmd || !userCmd.pressButtonsBothBanks(cs2::CCSGOInput::Buttons::kAttack))
             return false;
-        // The attack START HISTORY INDEX is mandatory (2026-10-15, the
-        // "sv: Firing first shot, but no attack information present...
-        // attack1_start_history_index: -1" server warnings in the friend's
-        // log): a sent attack without it degrades lag comp to the fallback
-        // path. The in-progress command's input history is rebuilt by the
-        // game every frame and the size read can miss on the exact frame
-        // that ends up being sent - refuse the press then; every caller
-        // runs per frame and simply fires a frame later with a complete
-        // attack record.
+        // attack1_start_history_index is mandatory: a sent attack without it
+        // triggers the server "no attack information present" warning and
+        // degrades lag comp to the fallback path. the history size read can
+        // miss on the frame that ends up sent - refuse then; callers run per
+        // frame and fire a frame later with a complete attack record.
         const auto historySize = userCmd.inputHistorySize();
         if (!historySize.hasValue())
             return false;

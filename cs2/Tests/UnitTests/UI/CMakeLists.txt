@@ -2,7 +2,6 @@ target_sources(UnitTests PRIVATE
   ShadowStampTests.cpp
   FeatureBindTests.cpp
   MenuInputTests.cpp
-  ViewmodelRotationTests.cpp
   SelfIntegrityTests.cpp
 )
 

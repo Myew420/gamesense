@@ -91,11 +91,8 @@ TEST(AttackCommandTest, WritesNativeBanksBeforeButtonProtobufIsAllocated)
 
 TEST(AttackCommandTest, AttackWithoutHistoryIsRefusedNotSentMalformed)
 {
-    // 2026-10-15 contract (the "no attack information present in command /
-    // attack1_start_history_index: -1" server warnings): an attack press
-    // without a readable input history must be REFUSED - sending it would
-    // degrade server lag comp to the fallback path. Callers run per frame
-    // and fire a frame later with a complete attack record.
+    // no readable input history -> press REFUSED: sending it degrades server
+    // lag comp; callers retry next frame with a complete record.
     int context{};
     CommandFixture command;
     EXPECT_FALSE(AttackCommand<int>{context}.press(command.handle()));
@@ -112,9 +109,8 @@ TEST(AttackCommandTest, PressStampsAttackStartHistoryIndexSizeMinusOne)
 
 TEST(RecoilApplyTest, FullPunchSubtractedFromEveryEntry)
 {
-    // The 2026-10-13 rewrite: the compensation rides the input-history ENTRY
-    // angles (the shot reconstruction surface), subtracting the FULL current
-    // punch - not the cmd BASE angles (the camera) and not a per-command delta.
+    // compensation subtracts the FULL current punch from the input-history
+    // ENTRY angles, not the cmd BASE angles, not a per-command delta.
     CommandFixture command;
     command.history();
     recoil_compensation::apply(command.handle(), -2.0f, 1.0f);
@@ -126,8 +122,7 @@ TEST(RecoilApplyTest, FullPunchSubtractedFromEveryEntry)
 
 TEST(RecoilApplyTest, CameraBaseAnglesUntouched)
 {
-    // The friend report "it moves the screen down": the camera IS the cmd base
-    // angles - compensation must never touch them.
+    // the camera is the cmd base angles: compensation must never touch them.
     CommandFixture command;
     command.history();
     recoil_compensation::apply(command.handle(), -2.0f, 1.0f);
@@ -137,11 +132,8 @@ TEST(RecoilApplyTest, CameraBaseAnglesUntouched)
 
 TEST(RecoilApplyTest, PerFrameRebuildKeepsConstantKickFromAccumulating)
 {
-    // The game rebuilds the command (base + entries) from the player's real
-    // input every frame, and CreateMove runs every frame on the in-progress
-    // command - so apply() always sees FRESH entry angles. Model the rebuild
-    // between applies: a constant punch must not accumulate across frames
-    // (the old delta math was the accumulating kind).
+    // the game rebuilds base + entries from real input every frame, so apply()
+    // always sees fresh entry angles: a constant punch must not accumulate.
     CommandFixture command;
     for (int frame = 0; frame < 5; ++frame) {
         command.history();

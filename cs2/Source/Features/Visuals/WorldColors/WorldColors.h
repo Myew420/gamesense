@@ -148,16 +148,17 @@ public:
     {
         auto& state = hookContext.featuresStates().visualFeaturesStates.worldColorsState;
         const bool enabled = GET_CONFIG_VAR(WorldColorsBloomEnabled);
+        // strength cvar: 1 = max strength, default -1 disables. Slider 0..100 -> 0..1.
         const float desired = enabled
-            ? static_cast<float>(GET_CONFIG_VAR(WorldColorsBloomStrength)) * 0.05f
+            ? static_cast<float>(GET_CONFIG_VAR(WorldColorsBloomStrength)) / 100.0f
             : 0.0f;
 
         if (!enabled) {
             if (state.bloomWasEnabled) {
                 if (state.bloomOriginalValid)
                     queueBloom(state.bloomOriginal, state);
-                else
-                    VerifyConsole::write(10.0f, "bloom", "disable skipped - no cached original");
+                if (state.bloomEnableOriginalValid)
+                    restoreBloomEnable(state);
             }
             state.bloomWasEnabled = false;
             return;
@@ -167,11 +168,24 @@ public:
             if (const auto original = cvarSystem().readFloatConVar(kBloomCvarName); original.has_value()) {
                 state.bloomOriginal = original.value();
                 state.bloomOriginalValid = true;
-                VerifyConsole::write(30.0f, "bloom", "cvar found, original=%.3f", state.bloomOriginal);
-            } else {
-                VerifyConsole::write(30.0f, "bloom", "cvar NOT found/type mismatch - memory path inactive");
             }
         }
+        // r_csgo_render_post_bloom (default off) is the bloom pass master
+        // switch; the strength cvar alone does nothing. Its numeric type is
+        // int-or-float depending on build; both type-checked readers/writers
+        // fail closed on mismatch.
+        if (!state.bloomEnableOriginalValid) {
+            if (const auto original = cvarSystem().readIntConVar(kBloomEnableCvarName); original.has_value()) {
+                state.bloomEnableOriginal = original.value();
+                state.bloomEnableOriginalValid = true;
+            } else if (const auto originalFloat = cvarSystem().readFloatConVar(kBloomEnableCvarName); originalFloat.has_value()) {
+                state.bloomEnableOriginal = originalFloat.value() != 0.0f ? 1 : 0;
+                state.bloomEnableOriginalValid = true;
+                state.bloomEnableIsFloat = true;
+            }
+        }
+        if (state.bloomEnableOriginalValid && !state.bloomEnableForced)
+            forceBloomEnable(state);
 
         const bool valueChanged = !state.bloomQueuedValid || state.lastQueued != desired;
         bool drifted = false;
@@ -186,17 +200,13 @@ public:
         state.bloomWasEnabled = true;
     }
 
-    // Engine fog override (2026-10-10 RE): the client carries the classic fog_*
-    // cvar family, and fog_override claims "Overrides the map's fog settings
-    // (-1 populates fog_ vars with map's values)". Live-read layout on
-    // 11106093: fog_override int32 (default 0), fog_enable bool (1),
-    // fog_color THREE FLOATS r/g/b (default -1 = use map), fog_start/fog_end/
-    // fog_maxdensity floats (default -1). The C_EnvCubemapFog entities carry
-    // distance/opacity but their COLOR comes from the cubemap texture - the
-    // fog_color cvar is the only color lever we have. Console-queue once per
-    // change + 2s drift (engine parses its own encoding) with direct memory
-    // writes as backstop; originals cached on first enable, restored on the
-    // disable edge (fog_override -1 lets the engine repopulate from the map).
+    // Engine fog via the classic fog_* cvar family: fog_override int32
+    // (default 0), fog_enable bool (1), fog_color three floats r/g/b (default
+    // -1 = use map), fog_start/fog_end/fog_maxdensity floats (default -1).
+    // C_EnvCubemapFog color comes from the cubemap texture; fog_color is the
+    // only color lever. Direct force writes; originals cached on first enable,
+    // restored on the disable edge (fog_override -1 lets the engine repopulate
+    // fog_color from the map).
     void updateFogCvars() const noexcept
     {
         auto& state = hookContext.featuresStates().visualFeaturesStates.worldColorsState;
@@ -204,9 +214,8 @@ public:
         const bool enabled = GET_CONFIG_VAR(WorldColorsFogEnabled);
 
         // Restore edge: same direct-force path (the console commands are
-        // FCVAR_CHEAT-rejected - see below - so restore NEVER used the queue
-        // to begin with). All cached fog_* values are restored, -1 lets the
-        // engine repopulate fog_color from the map.
+        // FCVAR_CHEAT-rejected); -1 lets the engine repopulate fog_color
+        // from the map.
         if (!enabled) {
             if (state.fogCvarsCached) {
                 static_cast<void>(cv.forceIntConVar("fog_override", state.fogOverrideOriginal));
@@ -243,14 +252,11 @@ public:
             static_cast<float>(color.r()), static_cast<float>(color.g()), static_cast<float>(color.b()),
         };
 
-        // 2026-10-13 (in-game report): the fog_* cvars are FCVAR_CHEAT-flagged,
-        // so the console queue ("fog_override 1" etc. every 2s) NEVER lands -
-        // the engine prints "[Console] SV: Convar ... is cheat protected,
-        // change ignored" for every command, twice per cycle, forever. The
-        // console queue is pure spam; the DIRECT force writes below are the
-        // real lever (they set the value the renderer reads at ConVar+value,
-        // past the flag). Queue deleted; values written every enable frame.
-        // Both override families are set (fog_* classic + fog_override_*).
+        // fog_* cvars are FCVAR_CHEAT-flagged: the console queue never lands
+        // ("change ignored" spam). The DIRECT force writes below are the real
+        // lever (they set the value the renderer reads at ConVar+value, past
+        // the flag), run every enable frame. Both override families are set
+        // (fog_* classic + fog_override_*).
         static_cast<void>(cv.forceIntConVar("fog_override", 1));
         static_cast<void>(cv.forceBoolConVar("fog_override_enable", true));
         static_cast<void>(cv.forceFloatConVar("fog_start", 0.0f));
@@ -268,26 +274,20 @@ public:
     
     
     // World recolor. `writeObjectLightTint` is true ONLY on the base-desc
-    // (CBaseSceneObjectDesc) path: its draw impl (0x41C380 on 11106093, formerly
-    // 0x40E240) copies sceneObject+0x50/+0x54 (object = qword at prim+0x18) into
-    // the per-frame light entries each draw, so writing the tint there colors
-    // walls through the light queue - the documented "working path".
+    // (CBaseSceneObjectDesc) path: its draw impl (0x41C380 on 11106093) copies
+    // sceneObject+0x50/+0x54 (object = qword at prim+0x18) into the per-frame
+    // light entries each draw, so writing the tint there colors walls through
+    // the light queue.
     // The aggregate path (TinyBVH walk) is NOT verified for object layout and
-    // previously CRASHED with a prim+0x00 object read (2026-09-06) - it stays
-    // prim-albedo-only: a stale offset costs a missing recolor, never a crash.
-    // ponytail: no save/restore of the object tint - disable clears at map
-    // change; add a cached-restore only if that ever bothers anyone.
-    // WORLD MODULATION (2026-10-10 verdict): FAIL-CLOSED NO-OP.
-    // Live user verdict: prim albedo (+0x50) recolors weapons and random
-    // props with wrong colors (world shaders don't consume it as a tint);
-    // scene-object +0x50/+0x54 are the LIGHT-QUEUE FLOAT sources copied into
-    // per-frame light entries (+4/+8) - writing RGBA u32s there corrupts
-    // lighting (wrong colors, transparency when alpha drops, hue shifts).
-    // The correct write (velocity's world color) is the light-queue ENTRY
-    // color u32 at entry+0 (queue global -> [queue+0x18] base, entry stride
-    // 0x20, per-object count/index) - needs the queue-global RE session
-    // with the game IN A MATCH. Until then: no write, "a missing recolor
-    // must cost a missing recolor, never a corruption".
+    // crashed once on a prim+0x00 object read: keep it prim-albedo-only; a
+    // stale offset costs a missing recolor, never a crash. No save/restore of
+    // the object tint; disable clears at map change.
+    // WORLD MODULATION is a FAIL-CLOSED NO-OP: prim albedo (+0x50) recolors
+    // with wrong colors (world shaders don't consume it as tint) and
+    // scene-object +0x50/+0x54 are light-queue FLOAT sources: writing RGBA
+    // u32s there corrupts lighting. The correct write is the light-queue
+    // ENTRY color u32 at entry+0 (queue global -> [queue+0x18] base, entry
+    // stride 0x20, per-object count/index). Until that is RE'd: no write.
     void recolorWorld(void* primitives, int primitiveCount) const noexcept
     {
         static_cast<void>(primitives);
@@ -306,6 +306,10 @@ public:
     
     
     static constexpr const char* kBloomCvarName = "r_csgo_render_post_bloom_strength";
+
+    // The bloom pass master switch (default off); the strength cvar is
+    // consumed only when this is on.
+    static constexpr const char* kBloomEnableCvarName = "r_csgo_render_post_bloom";
 
 
     struct SavedSkyTint {
@@ -374,6 +378,29 @@ private:
         state.lastQueued = value;
         state.bloomQueuedValid = true;
         state.lastQueueTime = monotonicSeconds();
+    }
+
+    void forceBloomEnable(auto& state) const noexcept
+    {
+        char command[64];
+        std::snprintf(command, sizeof(command), "%s 1", kBloomEnableCvarName);
+        hookContext.template make<EngineCommandExecutor>().execute(command);
+        // Cheat-gated cvar: the console line is refused on sv_cheats 0 servers,
+        // the direct memory write is the lever that counts.
+        if (state.bloomEnableIsFloat)
+            static_cast<void>(cvarSystem().forceFloatConVar(kBloomEnableCvarName, 1.0f));
+        else
+            static_cast<void>(cvarSystem().forceIntConVar(kBloomEnableCvarName, 1));
+        state.bloomEnableForced = true;
+    }
+
+    void restoreBloomEnable(auto& state) const noexcept
+    {
+        if (state.bloomEnableIsFloat)
+            static_cast<void>(cvarSystem().forceFloatConVar(kBloomEnableCvarName, static_cast<float>(state.bloomEnableOriginal)));
+        else
+            static_cast<void>(cvarSystem().forceIntConVar(kBloomEnableCvarName, state.bloomEnableOriginal));
+        state.bloomEnableForced = false;
     }
 
     [[nodiscard]] static double monotonicSeconds() noexcept

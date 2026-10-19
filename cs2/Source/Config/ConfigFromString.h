@@ -5,12 +5,9 @@
 #include "ConfigStringConversionState.h"
 #include <Platform/Macros/FunctionAttributes.h>
 
-// SkipUnknownKeys: the load-time mode. The strict sequential walk (default)
-// requires file keys in exact schema order; the tolerant mode additionally
-// skips key/value pairs the schema does not know, so a config file saved by
-// an older schema revision (extra/renamed keys) still loads. The real load
-// path (Config.h) runs valid() first and always passes the flag; the raw
-// parser default keeps the documented strict state machine.
+// SkipUnknownKeys: load-time mode. strict walk (default) requires keys in
+// exact schema order; tolerant mode skips unknown pairs so older-revision
+// configs still load. Config.h always passes the flag.
 struct SkipUnknownKeysTag {
     explicit SkipUnknownKeysTag() = default;
 };
@@ -61,11 +58,8 @@ public:
 
     void endObject() noexcept
     {
-        // Tolerant mode only: skip pairs the schema does not consume
-        // (older-revision leftovers) up to this object's closing brace, so
-        // the walk stays in sync with the file even when the schema dropped
-        // or renamed keys. Strict mode keeps the documented whitespace +
-        // closing-brace read.
+        // tolerant mode: skip unconsumed pairs up to the closing brace so the
+        // walk stays in sync. strict mode keeps the plain brace read.
         if (shouldReadMe() && (skipUnknownKeys ? skipUntilObjectEnd() : skipWhitespaces()) && readChar(u8'}'))
             decreaseConversionNestingLevel();
         decreaseNestingLevel();
@@ -174,16 +168,14 @@ private:
         while (true) {
             if (readString(key) && readChar(u8'"') && skipWhitespaces() && readChar(u8':'))
                 return true;
-            // The key at the cursor is not the expected one (or a longer one):
-            // it was left by an older schema revision. Skip it (string, ':',
-            // value, ',') and try the next key instead of failing the load.
+            // unexpected key: skip it (string, ':', value, ',') and try the
+            // next key instead of failing the load.
             if (!(skipKeyRest() && readChar(u8'"') && skipWhitespaces() && readChar(u8':') && skipValue()))
                 break;
             if (!(skipWhitespaces() && readChar(u8',') && skipWhitespaces() && readChar(u8'"')))
                 break;
         }
-        // Expected key not in this object: restore the cursor so the caller's
-        // save/restore contract (and the object-end skip) sees the old state.
+        // key not found: restore the cursor for the caller's save/restore contract.
         readIndex = entryReadIndex;
         return false;
     }

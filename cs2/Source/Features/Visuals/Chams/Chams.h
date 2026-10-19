@@ -46,8 +46,8 @@ public:
     }
 
     // CGlowHelperSceneObjectDesc::GeneratePrimitives calls the attached mesh
-    // descriptor at +0x20, returning to client +0x1907de1 on this build.
-    // Preserve that nested generation while suppressing its ordinary mesh pass.
+    // descriptor at +0x20, return address client +0x1907de1 on this build.
+    // Keep the nested generation, suppress the ordinary mesh pass.
     [[nodiscard]] static bool isOutlineGeneration(std::uintptr_t returnAddress) noexcept
     {
         return hideModelsSupported() && returnAddress == CrashLogger::clientModule.base + 0x1907de1;
@@ -78,12 +78,10 @@ public:
     static constexpr int kSnapshotRefreshInterval = 64;
     static constexpr std::uint32_t kMaxOverridePrimitives = 4096;
 
-    // Target state is double-buffered and atomically published: the DrawArray hook
-    // fires on MULTIPLE render threads (live diag showed 6+ threads hitting it
-    // concurrently) while the refresh rebuilds on a GeneratePrimitives thread.
-    // Rebuilding in place made readers see half-cleared pawn/scene-object tables -
-    // the gate matched every other frame = the 2026-10-17 flicker. One writer at a
-    // time (refreshInFlight), publish by swapping the active index (release/acquire).
+    // Double-buffered, atomically published: DrawArray fires on MULTIPLE render
+    // threads while the refresh rebuilds on a GeneratePrimitives thread. One
+    // writer at a time (refreshInFlight), publish by active-index swap
+    // (release/acquire); in-place rebuilds made readers see half-cleared tables.
     struct SceneObjectEntry {
         const void* object;
         std::uint8_t pawnIndex;
@@ -160,16 +158,12 @@ public:
     
     
     
-    // Chams targeting (2026-10-17 live round): the +0x100 chain is a REAL ownership
-    // link only for CARRIED-WEAPON scene objects (the enemy knife chams prove it);
-    // for PLAYER-BODY scene objects it resolves to a random pawn or null - bodies never
-    // matched the gate, which is why "only the knife changed". Bodies are targeted via
-    // a registry built from the ModelGlow-proven walk instead: pawn -> render component
-    // -> scene-object-updater vector -> CSceneObject*, the same enumeration
-    // applySpawnProtectionEffect/glow uses (live-verified: the objects from this walk
-    // are exactly the ones CAnimatableSceneObjectDesc::DrawArray draws, and their
-    // prim+0x20 carries a CMaterial2 - the material override DOES work on bodies).
-    // Gate order: registry first (bodies), then the chain (weapons).
+    // The +0x100 chain is a real ownership link only for CARRIED-WEAPON scene
+    // objects; for player bodies it resolves to a random pawn or null. Bodies
+    // are targeted via the registry walk: pawn -> render component ->
+    // scene-object-updater vector -> CSceneObject* (the objects DrawArray
+    // draws; their prim+0x20 carries a CMaterial2, so the material override
+    // works on bodies). Gate order: registry first (bodies), then the chain.
     void registerPawnSceneObjects(Snapshot& snapshot, cs2::C_BaseEntity* pawn, std::uint8_t pawnIndex, bool enemy) noexcept
     {
         // Every read safeRead-guarded: this runs on the render thread inside the hook
@@ -226,11 +220,9 @@ public:
         return field.get() && safeReadField(field.get(), out);
     }
 
-    // The updaters vector is EMBEDDED in the render component: OffsetToSceneObjectUpdaters
-    // resolves to the address of the CUtlVector STRUCT ITSELF (rc+0x38), not a pointer
-    // field - the 2026-10-17 empty-registry bug was exactly this one dereference too many
-    // (diag: regEntries=0 while livePawns>0). ModelGlow's SceneObjectUpdaters reads it
-    // the same way: updaters->size at +0, updaters->memory at +8.
+    // The updaters vector is EMBEDDED in the render component:
+    // OffsetToSceneObjectUpdaters resolves to the address of the CUtlVector
+    // struct itself (rc+0x38), not a pointer field. size at +0, memory at +8.
     [[nodiscard]] bool sceneObjectUpdatersOf(cs2::CRenderComponent* renderComponent, void** updatersAddressOut) noexcept
     {
         const auto field = hookContext.patternSearchResults().template get<OffsetToSceneObjectUpdaters>().of(renderComponent);
@@ -246,8 +238,8 @@ public:
         return field.get() && safeReadField(field.get(), out);
     }
 
-    // Own viewmodel (first-person hands + weapon) - the game's own renderable-flag
-    // bit, same read the ModelGlow scene-object helpers use (SCENEOBJECTFLAG_VIEWMODEL_LAYER).
+    // Own viewmodel (first-person hands + weapon): the game's renderable-flag
+    // bit SCENEOBJECTFLAG_VIEWMODEL_LAYER.
     [[nodiscard]] bool isPartOfViewmodel(const void* sceneObject) noexcept
     {
         if (!sceneObject)
@@ -354,22 +346,19 @@ public:
     
     
     
-    // Primitive color at +0x50 is stored little-endian R,G,B,A BYTES (the game's own
-    // packing fn assembles c0 | c1<<8 | c2<<16 | c3<<24 from a float[4]; the Windows ref
-    // struct is {u8 r,g,b,a}). color::Rgba packs 0xRRGGBBAA, which is byte-REVERSED -
-    // writing it raw made saturated colors shift channels and picker-grays go
-    // semi-transparent (2026-10-17 in-game report). Always convert through here.
+    // Primitive color at +0x50 is stored little-endian R,G,B,A BYTES
+    // (c0 | c1<<8 | c2<<16 | c3<<24). color::Rgba packs 0xRRGGBBAA, which is
+    // byte-REVERSED; always convert through here.
     [[nodiscard]] static std::uint32_t primitiveColor(color::Rgba rgba) noexcept
     {
         return (std::uint32_t{rgba.a()} << 24) | (std::uint32_t{rgba.b()} << 16)
             | (std::uint32_t{rgba.g()} << 8) | std::uint32_t{rgba.r()};
     }
 
-    // Draw-side (DrawArray) helpers. In DrawArray the primitives argument is the RAW
-    // 0x70-stride array base with the count as a separate argument (unlike the
-    // GeneratePrimitives buffer struct). The game re-binds prim+0x20 to the entity's
-    // own material between generation and the draw, so the material swap has to
-    // happen here, right before the original DrawArray runs.
+    // Draw-side (DrawArray) helpers: primitives arg is the RAW 0x70-stride array
+    // base, count passed separately (unlike the GeneratePrimitives buffer struct).
+    // The game re-binds prim+0x20 to the entity's own material between generation
+    // and draw, so the swap must happen right before the original DrawArray runs.
     [[nodiscard]] static const void* sceneObjectOfFirstPrimitive(const void* primitives) noexcept
     {
         if (!primitives)
@@ -396,15 +385,11 @@ public:
         }
     }
 
-    // Real-material override for the chams primitive ranges. The Linux scene primitive
-    // (stride 0x70, verified from GeneratePrimitives/DrawArray disasm on 14191) carries
-    // the material at +0x20 and +0x28 (the game writes the same material pointer into
-    // both, the Windows ref calls them material/material2) and the paint-vertex-color
-    // tint at +0x50. The occluded material's vmat flags (F_IGNOREZ/F_DISABLE_Z_*) handle
-    // through-wall drawing by themselves, so the primitive depth bits are left alone.
-    // The span cap mirrors the Windows reference's kMaxPrimitivesPerPass guard: a model
-    // emitting more primitives than any sane mesh means the buffer state is not what we
-    // think - skip rather than write.
+    // Real-material override. Linux scene primitive (stride 0x70): material at
+    // +0x20 and +0x28 (same pointer in both), tint at +0x50. The occluded
+    // material's vmat flags (F_IGNOREZ/F_DISABLE_Z_*) handle through-wall drawing
+    // alone, so the primitive depth bits stay untouched. Spans larger than
+    // kMaxOverridePrimitives mean unexpected buffer state: skip rather than write.
     static void applyMaterialOverride(void* primitives, std::uint32_t prevCount, std::uint32_t newCount,
                                       const void* material, std::uint32_t colorPacked) noexcept
     {

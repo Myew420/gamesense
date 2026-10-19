@@ -26,9 +26,8 @@ std::vector<std::string> extractResources(std::string_view text)
     return resources;
 }
 
-// Every texture the shipped vmats may reference. Verified to exist as a compiled
-// resource in the current game pak01_dir.vpk tree (2026-10-17 offline VPK audit).
-// If a new vmat needs a new texture, verify it against the VPKs first, then add it here.
+// textures the shipped vmats may reference; verified to exist in the game
+// pak01_dir.vpk. verify new textures against the VPKs before adding.
 const std::vector<std::string>& verifiedResources()
 {
     static const std::vector<std::string> resources = {

@@ -20,12 +20,9 @@
 #include <Utils/Optional.h>
 #include <Utils/Trig.h>
 
-// Saved grenade throws (2026-10-15, deadlocked's design): record your
-// position + view angles + weapon while holding a live grenade; later, with
-// the same grenade out near a saved spot, aim at the recorded angles so the
-// throw lands where the recorded one did. Deadlocked's ui/grenades.rs keeps
-// a per-map JSON list; this is the flat-file port (the feature_binds.txt
-// pattern): one "<map> <defIndex> <x> <y> <z> <pitch> <yaw>" line per throw.
+// saved grenade throws: record position + view angles + weapon while holding a
+// live grenade; replay the angles near the saved spot. flat-file format: one
+// "<map> <defIndex> <x> <y> <z> <pitch> <yaw>" line per throw.
 namespace grenade_throws
 {
 
@@ -132,8 +129,7 @@ inline void save() noexcept
     ::close(fd);
 }
 
-// Current map name (the Lua map-name buffer contract: set by the game-event
-// path, empty before the first round).
+// current map name: set by the game-event path, empty before the first round
 inline char currentMap[32]{};
 
 inline void setCurrentMap(const char* name) noexcept

@@ -13,36 +13,21 @@
 #include <Utils/NsStr.h>
 #include <Utils/StatusReport.h>
 
-// Runtime-created real vmat materials for player chams (2026-10-17 RE round).
-//
-// Verified against the archived 14191 binaries (all offsets from disasm, no patterns):
-//  - libmaterialsystem2 exports CreateInterface; CreateInterface("VMaterialSystem2_001")
-//    returns the CMaterialSystem2 singleton (typeinfo 16CMaterialSystem2, ctor 0x737e0).
-//  - CMaterialSystem2 vtable slot 28 = CreateMaterial: fn(rdi ignored, rsi=name,
-//    rdx=KeyValues3* doc, ecx=manager flag, r8d=init flag) -> rax material. Slot 28 and
-//    the whole vtable are byte-identical across the 10-06/10-09/10-15 archived builds.
-//    (Older Linux bases wrote the result through an out-handle param instead - the
-//    runtime get_name self-check below accepts either, fail-closed otherwise.)
-//  - libtier0 exports LoadKV3(KeyValues3*, CUtlString*, const char* text, const KV3ID&,
-//    const char* filename, unsigned flags). The KV3 "generic" format id the game itself
-//    passes = { "generic", 0x469806E97412167C, 0xE73790B53EE6F2AF } (GUID
-//    7412167c-06e9-4698-aff2-e63eb59037e7 packed little-endian; static tables at
-//    materialsystem2 0x1b0480/0x1b0ec0). The doc blob must be zero-initialized header +
-//    node space; no SetType call is needed on Linux.
-//  - Every texture reference below was verified to exist as a compiled resource in the
-//    current game VPKs. The friend's Windows vmats used
-//    materials/dev/primary_white_color_tga_*.vtex and default_normal_tga_7652cb.vtex -
-//    both MISSING from the current pak01 dir tree (the same stale-resource class as the
-//    old tracer.vpcf bug), so they are substituted with verified equivalents.
-// Primitive binding: material pointers at prim+0x20 AND prim+0x28 (the game's own
-// GeneratePrimitives writes the same material into both), color RGBA at prim+0x50.
-//
-// ponytail: the doc blob is a fixed 0x2900-byte zeroed heap block (0x100 header + 0x2800
-// node space), the size used by the working Linux reference implementation; the KV3 parser
-// bump-allocates nodes inside it. Ceiling: very large vmats could exhaust it - upgrade path
-// is the CKV3Arena ctor (materialsystem2 0x118610) if that ever shows up in the log.
-// ponytail: materials are created once per session on the render thread and never released
-// (the resource system owns them after CreateMaterial); a session leaks ~14 * 0x2900 bytes.
+// Runtime-created real vmat materials for player chams.
+// Verified against the archived 14191 binaries (offsets from disasm):
+//  - libmaterialsystem2 CreateInterface("VMaterialSystem2_001") returns the
+//    CMaterialSystem2 singleton; CreateMaterial is vtable slot 28
+//    (name, KV3 doc, manager flag, init flag) -> material.
+//  - libtier0 LoadKV3(doc, errorString, text, kv3Id, filename, flags). The doc
+//    blob must be zero-initialized header + node space; no SetType call on Linux.
+//  - Every texture reference below exists in the current game VPKs.
+// Primitive binding: material pointers at prim+0x20 AND prim+0x28, color RGBA
+// at prim+0x50.
+// doc blob = fixed 0x2900-byte zeroed heap block (0x100 header + 0x2800 node
+// space); the KV3 parser bump-allocates nodes inside it. Ceiling: very large
+// vmats could exhaust it; upgrade path is the CKV3Arena ctor (materialsystem2
+// 0x118610). Materials are created once per session and never released (the
+// resource system owns them); a session leaks ~14 * 0x2900 bytes.
 
 namespace chams_materials
 {
@@ -71,7 +56,7 @@ using LoadKV3Fn = bool (*)(void* doc, void* errorString, const char* text, const
 using CreateMaterialFn = void* (*)(void* materialSystem, const char* name, void* kv3Doc, unsigned int managerFlag, std::uint8_t initFlag);
 using GetNameFn = const char* (*)(void* material);
 
-// The "generic" KV3 format id exactly as the game passes it (see file header).
+// The "generic" KV3 format id exactly as the game passes it.
 struct KV3ID {
     const char* name;
     std::uint64_t hash1;
@@ -92,9 +77,9 @@ inline void* materialSystem = nullptr;
 inline const std::byte* materialSystemCodeBegin = nullptr;
 inline const std::byte* materialSystemCodeEnd = nullptr;
 inline bool symbolsResolved = false;
-// Cross-thread publication: created on the MAIN thread (CreateMove), consumed on the
-// render thread (GeneratePrimitives hook). Pointers are plain, visibility is ordered by
-// the acquire/release on creationAttempted/creationFailed - never read the material
+// Cross-thread publication: created on the MAIN thread (CreateMove), consumed
+// on the render thread (GeneratePrimitives hook). Visibility is ordered by the
+// acquire/release on creationAttempted/creationFailed; never read the material
 // pointers unless materialsReady() was observed true.
 inline std::atomic<bool> creationAttempted{false};
 inline std::atomic<bool> creationFailed{false};
@@ -135,10 +120,10 @@ inline void setError(const char* message) noexcept
     return true;
 }
 
-// Accepts either the CMaterial2* directly (current ABI) or one pointer indirection
-// (older handle-style result), but only if the object's vtable slot 0 is a function
-// inside libmaterialsystem2's code section AND returns exactly our material name.
-// Never calls through anything that did not pass the module-code check. Fail-closed.
+// Accepts CMaterial2* directly (current ABI) or one pointer indirection (older
+// handle-style result), but only if vtable slot 0 is a function inside
+// libmaterialsystem2's code section AND returns exactly our material name.
+// Never calls anything that did not pass the module-code check. Fail-closed.
 [[nodiscard]] inline void* verifyMaterialPointer(void* candidate, const char* expectedName) noexcept
 {
     for (int dereference = 0; dereference < 2 && candidate; ++dereference) {
@@ -187,7 +172,7 @@ inline void setError(const char* message) noexcept
     return verifyMaterialPointer(createMaterial(materialSystem, name, doc, 0, 1), name);
 }
 
-// All texture refs verified against the current pak01_dir.vpk tree (see file header).
+// All texture refs verified against the current pak01_dir.vpk tree.
 inline constexpr auto kFlatVisible =
     "Shader = \"csgo_unlitgeneric.vfx\"\n"
     "F_IGNOREZ = 0\nF_DISABLE_Z_WRITE = 0\nF_DISABLE_Z_BUFFERING = 0\n"
@@ -241,7 +226,6 @@ inline constexpr auto kLatexVisible =
     "g_bFogEnabled = 0\ng_flMetalness = 0.000000\n"
     "g_tMetalness = resource:\"materials/default/default_metal_tga_8fbc2820.vtex\"\n"
     "g_tColor = resource:\"materials/vgui/white_color_tga_998b1b45.vtex\"\n"
-    "g_tAmbientOcclusion = resource:\"materials/default/default_ao_tga_79a2e0d0.vtex\"\n"
     "g_tNormal = resource:\"materials/default/default_normal_tga_1b833b2a.vtex\"\n}";
 
 inline constexpr auto kLatexOccluded =
@@ -251,7 +235,6 @@ inline constexpr auto kLatexOccluded =
     "g_vColorTint = [1.000000, 1.000000, 1.000000, 1.000000]\n"
     "g_bFogEnabled = 0\ng_flMetalness = 0.000000\n"
     "g_tColor = resource:\"materials/vgui/white_color_tga_998b1b45.vtex\"\n"
-    "g_tAmbientOcclusion = resource:\"materials/default/default_ao_tga_79a2e0d0.vtex\"\n"
     "g_tNormal = resource:\"materials/default/default_normal_tga_1b833b2a.vtex\"\n"
     "g_tMetalness = resource:\"materials/default/default_metal_tga_8fbc2820.vtex\"\n}";
 
@@ -356,10 +339,9 @@ inline void* occludedMaterials[kMaterialTypeCount]{};
     return detail::lastError;
 }
 
-// Must be called on the MAIN thread only (CreateMove) - FrameworkCS2 creates its materials
-// from the menu/main thread and 2026-10-17's first in-game round crashed after the render
-// thread did it from inside GeneratePrimitives (thread corruption, livePawnCount wiped).
-// Creates the whole set once; after one attempt the verdict is final for the session.
+// MAIN thread only (CreateMove); creating from inside GeneratePrimitives on the
+// render thread corrupts thread state. Creates the whole set once; after one
+// attempt the verdict is final for the session.
 [[nodiscard]] inline bool ensureMaterialsCreated() noexcept
 {
     if (detail::creationAttempted.load(std::memory_order_acquire))
@@ -399,8 +381,9 @@ inline void* occludedMaterials[kMaterialTypeCount]{};
     return true;
 }
 
-// True until the one-shot creation has run - the main-thread (CreateMove) side uses this
-// to decide whether to create; the render-thread hook only ever reads materialsReady().
+// True until the one-shot creation has run; the main thread (CreateMove) uses
+// this to decide whether to create; the render-thread hook only ever reads
+// materialsReady().
 [[nodiscard]] inline bool needsCreation() noexcept
 {
     return !detail::creationAttempted.load(std::memory_order_acquire);

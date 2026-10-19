@@ -14,6 +14,7 @@
 #include <GameClient/Entities/BaseEntity.h>
 #include <GameClient/Entities/PlayerPawn.h>
 #include <GameClient/EntitySystem/EntitySystem.h>
+#include <GameClient/InputHistory.h>
 #include <GameClient/SchemaSystem/SchemaReadiness.h>
 #include <GameClient/UserCmd.h>
 #include <GameClient/WorldToScreen/WorldToClipSpaceConverter.h>
@@ -24,24 +25,13 @@
 #include <Utils/Optional.h>
 #include <Utils/Trig.h>
 
-// Anti-aim (velocity features/combat/impl/misc.cpp antiaim). CS2 semantics: the
-// server clamps CS:GO-style desync, so what works is real pitch/yaw on the
-// server-side view reconstruction - pitch down/up, base yaw 180 off view,
-// at-targets/autoyaw/manual-side/avoid-backstab, and the +33 model-roll
-// compensation.
-//
-// ANGLE DELIVERY (2026-10-15, owner request "just do it in the feature
-// itself"): the AA writes its angles DIRECTLY on the command's base
-// viewangles - no FVA feature dependency. The input-history channel turned
-// out to only affect SHOT reconstruction: the server's animated model kept
-// the real angles ("the anti aim was not looking down at all"), so the FVA
-// delivery was invisible AA. Base writes are what the server (and everyone
-// spectating us) actually animates from. Tradeoff, accepted deliberately:
-// first-person camera follows the AA pitch when pitch AA is on - that is the
-// same view every CS:GO AA has; YAW-only AA does not touch the camera pitch.
-// On ticks where the aimbot staged a shot, the SHOT's target wins (the AA
-// stays quiet - that is hide-shots; with HideShots on, raw attack-held ticks
-// also stay quiet).
+// anti-aim: the server clamps CS:GO-style desync; AA writes real pitch/yaw
+// (pitch up/down, base yaw 180 off view, at-targets/autoyaw/manual-side/
+// avoid-backstab, +33 model-roll) directly on the command's base viewangles -
+// what the server animates from; the input-history channel only affects shot
+// reconstruction. camera pitch follows pitch AA; yaw-only AA doesn't touch
+// the camera. staged-shot ticks: the shot wins (hide-shots); with HideShots
+// on, attack-held ticks also stay quiet.
 template <typename HookContext>
 class AntiAim {
 public:
@@ -53,6 +43,7 @@ public:
     void onCreateMove(cs2::CUserCmd* cmd, bool aimbotShotStaged) const noexcept
     {
         aaActive = false;
+        stagedForApply = false;
 
         if (!GET_CONFIG_VAR(antiaim_vars::Enabled))
             return;
@@ -102,20 +93,62 @@ public:
         else if (yawSide == 1)
             indicatorYaw += 90.0f;
 
-        // Base-angle write in the feature itself (2026-10-15, owner request):
-        // the old FVA-channel arming is gone - the server's model animation
-        // never consumed the history entries, so the AA was invisible.
-
-        // Fire ticks: the aimbot's own FVA target (the silent shot redirect)
-        // wins - arming ours would clobber it. That IS hide-shots behavior; with
-        // HideShots on, raw attack-held ticks also stay quiet (velocity's
-        // "hide onshot" default).
+        // fire ticks: the aimbot's shot redirect wins - arming ours would
+        // clobber it. with HideShots on, attack-held ticks also stay quiet.
         const bool attackHeld = userCmd.isButtonDown(kInAttack);
         if (aimbotShotStaged || (GET_CONFIG_VAR(antiaim_vars::HideShots) && attackHeld))
             return;
 
+        // stage for WriteMoveCrc: applied at the move-CRC point of THIS
+        // command (same cmd pointer + sequence). angles written at CreateMove
+        // run after the CRC is computed and never reach the server.
+        stagedCmd = cmd;
+        std::memcpy(&stagedSequence, reinterpret_cast<const std::byte*>(cmd) + cs2::CUserCmd::kCommandNumberOffset, sizeof(stagedSequence));
+        stagedForApply = true;
+    }
+
+    // runs inside the WriteMoveCrc hook, before the engine serializes +
+    // checksums the command; the CSGOInputHook restores the real angles right
+    // after the original call, so the camera stays free.
+    void onWriteMoveCrc(cs2::CUserCmd* cmd) const noexcept
+    {
+        if (!stagedForApply || !cmd || cmd != stagedCmd)
+            return;
+        int sequence{};
+        std::memcpy(&sequence, reinterpret_cast<const std::byte*>(cmd) + cs2::CUserCmd::kCommandNumberOffset, sizeof(sequence));
+        if (sequence != stagedSequence)
+            return;
+        stagedForApply = false;
+
+        const UserCmd userCmd{cmd};
+        if (!userCmd)
+            return;
         aaActive = true;
-        movement_fix::setViewAngles(userCmd, stagedPitch, stagedYaw);
+        const float yaw = normalizeYaw(stagedYaw);
+        movement_fix::setViewAngles(userCmd, stagedPitch, yaw);
+
+        // sync the input-history entries with the fake base angles: the
+        // engine validates history angles against the command's base
+        // viewangles; a mismatch surfaces as "Invalid player history" / server
+        // tick clamps. shot ticks never get here (hide-shots skips them).
+        InputHistory history{cmd};
+        const int entries = history.currentSize();
+        for (int i = 0; i < entries; ++i) {
+            std::byte* entry = history.entryAt(i);
+            if (!entry)
+                continue;
+            std::byte* qangle = nullptr;
+            std::memcpy(&qangle, entry + cs2::CUserCmd::InputHistory::kEntryViewAnglesOffset, sizeof(qangle));
+            if (!qangle)
+                continue;
+            std::memcpy(qangle + cs2::CUserCmd::BaseMessage::ViewAngles::kPitchOffset, &stagedPitch, sizeof(stagedPitch));
+            std::memcpy(qangle + cs2::CUserCmd::BaseMessage::ViewAngles::kYawOffset, &yaw, sizeof(yaw));
+            orBits(qangle + cs2::CUserCmd::BaseMessage::kHasBitsOffset, 0x3);
+            std::uint32_t entryHasBits{};
+            std::memcpy(&entryHasBits, entry + cs2::CUserCmd::InputHistory::kEntryHasBitsOffset, sizeof(entryHasBits));
+            entryHasBits |= cs2::CUserCmd::InputHistory::kEntryViewAnglesHasBit;
+            std::memcpy(entry + cs2::CUserCmd::InputHistory::kEntryHasBitsOffset, &entryHasBits, sizeof(entryHasBits));
+        }
     }
 
     // Feet arc publish (producer side): run from the render-start chain where the
@@ -179,6 +212,8 @@ public:
     void onUnload() const noexcept
     {
         aaActive = false;
+        stagedForApply = false;
+        stagedCmd = nullptr;
         overlay_layer::publishAaArc(nullptr, 0);
         indicatorPublished = false;
     }
@@ -186,6 +221,26 @@ public:
 private:
     static constexpr std::uint64_t kInUse = 1ull << 5;
     static constexpr std::uint64_t kInAttack = 1ull << 0;
+
+    // the server expects yaw within [-180, 180]; the at-targets/backstab math
+    // can produce values outside that band, and an unnormalized yaw clamps
+    // server-side into a different direction.
+    [[nodiscard]] static float normalizeYaw(float yaw) noexcept
+    {
+        while (yaw > 180.0f)
+            yaw -= 360.0f;
+        while (yaw < -180.0f)
+            yaw += 360.0f;
+        return yaw;
+    }
+
+    static void orBits(std::byte* at, std::uint32_t bits) noexcept
+    {
+        std::uint32_t value{};
+        std::memcpy(&value, at, sizeof(value));
+        value |= bits;
+        std::memcpy(at, &value, sizeof(value));
+    }
 
     [[nodiscard]] float pitchFor(float viewPitch) const noexcept
     {
@@ -205,8 +260,7 @@ private:
         auto&& localEye = eyeOf(hookContext.activeLocalPlayerPawn());
         float baseYaw = viewYaw - 180.0f;
 
-        // Avoid backstab: aim the yaw at the nearest enemy holding a knife
-        // within 350 units (velocity's backstab scan).
+        // avoid backstab: aim the yaw at the nearest knife enemy within 350 units.
         if (GET_CONFIG_VAR(antiaim_vars::AvoidBackstab)) {
             float knifeDistSq = 1.0e30f;
             float knifeYaw = 0.0f;
@@ -427,4 +481,7 @@ private:
     inline static float stagedPitch{0.0f};
     inline static float stagedYaw{0.0f};
     inline static float indicatorYaw{0.0f};
+    inline static cs2::CUserCmd* stagedCmd{nullptr};
+    inline static int stagedSequence{-1};
+    inline static bool stagedForApply{false};
 };

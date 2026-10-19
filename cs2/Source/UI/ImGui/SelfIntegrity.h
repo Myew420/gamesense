@@ -32,9 +32,8 @@ struct TextRange {
     std::size_t size{0};
 };
 
-// Seed overload: FNV-1a is a chained hash, so a pass can resume exactly -
-// fnv1a(b, seed=fnv1a(a)) == fnv1a(a ++ b). The render-thread tick feeds the
-// module .text scan in chunks through this (full-pass stalls hitched frames).
+// seeded overload: fnv1a is a chained hash, fnv1a(b, seed=fnv1a(a)) == fnv1a(a++b);
+// the .text scan feeds chunks through this.
 [[nodiscard]] inline NS_OBF_FLATTEN std::uint64_t fnv1a(const std::byte* data, std::size_t size,
     std::uint64_t seed = 0xcbf29ce484222325ULL) noexcept
 {
@@ -112,12 +111,9 @@ struct TextRange {
 
 inline NS_OBF_FLATTEN void tick() noexcept
 {
-    // Chunked .text scan (2026-10-13 perf fix): the full fnv1a pass over the
-    // module .text stalled the render thread ~5 ms once per tick (measured as
-    // the "[perf] slow menu frame" lines at exactly this tick's 15 s cadence in
-    // the friend's gui.log). The scan now feeds kScanChunk bytes per tick and
-    // compares on wrap, so no single frame pays the whole pass. Tamper drift is
-    // still caught, one full pass later (~ceil(size/chunk) ticks).
+    // chunked .text scan: the full fnv1a pass stalled the render thread, so
+    // feed kScanChunk bytes per tick and compare on wrap. tamper drift is
+    // caught one full pass later.
     constexpr std::size_t kScanChunk = 512 * 1024;
 
     static std::uint64_t baselineHash{0};
@@ -140,8 +136,8 @@ inline NS_OBF_FLATTEN void tick() noexcept
     if (range.start == 0)
         return;
 
-    // Fresh pass on the first tick, or if the module moved (relocation) - a
-    // cursor outside the range would hash foreign memory.
+    // fresh pass on first tick or module relocation (a cursor outside the
+    // range would hash foreign memory).
     const auto* rangeStart = reinterpret_cast<const std::byte*>(range.start);
     if (!scanCursor || scanCursor < rangeStart || scanCursor > rangeStart + range.size) {
         scanCursor = rangeStart;
@@ -167,8 +163,7 @@ inline NS_OBF_FLATTEN void tick() noexcept
     const std::uint64_t hash = scanHash;
     if (baselineHash == 0) {
         baselineHash = hash;
-        // Same forensic file as before: pid + range + baseline hash for
-        // offline correlation of a dumped module.
+        // forensic file: pid + range + baseline hash for offline correlation.
         
         
         

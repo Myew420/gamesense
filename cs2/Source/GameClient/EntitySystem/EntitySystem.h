@@ -76,45 +76,11 @@ public:
     void forEachNetworkableEntityIdentity(F&& f) const noexcept
     {
         const auto entityList = getEntityList();
-
-        
-        
-        
-        
-        {
-            static std::int64_t lastDiagNs = 0;
-            static std::uint32_t diagCount = 0;
-            const bool first = lastDiagNs == 0;
-            timespec ts{};
-            clock_gettime(CLOCK_MONOTONIC, &ts);
-            const std::int64_t nowNs = static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
-            if (first || nowNs - lastDiagNs > 10'000'000'000LL) {
-                if (++diagCount <= 12) {   
-                    lastDiagNs = nowNs;
-                    const auto offset = hookContext.patternSearchResults().template get<EntityListOffset>();
-                    const auto es = entitySystem();
-                    gui_log::write("[chaindiag] getEntityList: es=%p offset=%d list=%p",
-                        reinterpret_cast<const void*>(es),
-                        offset ? static_cast<int>(offset.rawOffset()) : -1,
-                        reinterpret_cast<const void*>(entityList));
-                }
-            }
-        }
         if (!entityList)
             return;
 
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
         {
-            static int strideVerdict = 0;   
+            static int strideVerdict = 0;
             static bool inconclusiveLogged = false;
             if (strideVerdict == 0) {
                 if (const auto* const chunk0 = entityList->chunks[0]) {
@@ -130,10 +96,9 @@ public:
                     };
                     const int hits112 = matches(112);
                     const int hits120 = matches(120);
-                    if (hits112 == 4 && hits120 != 4) {
-                        strideVerdict = 112;
-                        gui_log::write("[chaindiag] identity stride probe: 112 (sizeof) confirmed, 4/4 handle matches");
-                    } else if (hits120 == 4 && hits112 != 4) {
+                    if (hits112 == 4 && hits120 != 4)
+                        strideVerdict = 112;  // expected layout, stay silent (anomaly-only log contract)
+                    else if (hits120 == 4 && hits112 != 4) {
                         strideVerdict = 120;
                         gui_log::write("[chaindiag] identity stride probe: 120 - sizeof(CEntityIdentity)=112 IS WRONG, "
                                        "identities past slot 0 are misread; stop and re-derive the layout");

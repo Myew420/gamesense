@@ -10,23 +10,13 @@
 
 namespace recoil_compensation
 {
-// RCS (2026-10-13 rewrite, friend report "screen moves down, bullets not in one
-// point"): shots are reconstructed from the input-history ENTRY angles (the
-// FVA/silent-aim channel - SubtickShotWriter::writeShotIntoEntry is the idiom),
-// so the compensation goes THERE, subtracting the FULL current aim punch from
-// every entry's angles. The camera never comes into it.
-//
-// The old version wrote the cmd BASE angles (which pin the camera - the
-// 2026-10-10 anti-aim lesson: base writes are the camera) with the per-command
-// punch DELTA, which sank the visible view by the accumulated punch ("moves
-// the screen down") and left the shots one punch-step off the crosshair; its
-// entry writes reused the same delta, so the reconstructed shot landed at
-// view + punch[N-1] - a scattered arc, not one point.
-//
-// Entry angles are absolute real-view samples rebuilt from the mouse every
-// frame, so a per-frame FULL punch subtraction is idempotent (no accumulation):
-// reconstructed eye = view - punch, server shot = (view - punch) + punch =
-// view - every bullet lands at the crosshair, camera stays at the real view.
+// RCS: shots are reconstructed from the input-history ENTRY angles, so the
+// compensation subtracts the FULL current aim punch from every entry's angles
+// (SubtickShotWriter::writeShotIntoEntry is the idiom). the camera never comes
+// into it: base-angle writes pin the camera. entry angles are absolute view
+// samples rebuilt from the mouse every frame, so a full-punch subtraction is
+// idempotent: reconstructed eye = view - punch, server shot = (view - punch)
+// + punch = view.
 inline void apply(cs2::CUserCmd* cmd, float punchPitch, float punchYaw) noexcept
 {
     if (!__builtin_isfinite(punchPitch) || !__builtin_isfinite(punchYaw))

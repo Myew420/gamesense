@@ -4,11 +4,10 @@
 #include <Features/Combat/TargetSelection.h>
 #include "AimbotParams.h"
 
-// Per-weapon-group knobs (hitboxes, multipoint, pointscale, body aim, force shot,
-// hitchance, min damage) moved to RageGroupsConfigVariables.h - the Aimbot resolves
-// them per tick from the active weapon's group (RageGroups.h). The old keys remain in
-// ConfigSchema.h as parse-and-discard placeholders at their exact positions so old
-// config files keep loading.
+// per-weapon-group knobs (hitboxes, multipoint, pointscale, body aim, force
+// shot, hitchance, min damage) live in RageGroupsConfigVariables.h, resolved
+// per tick from the active weapon's group (RageGroups.h). old keys remain in
+// ConfigSchema.h as parse-and-discard placeholders so old configs keep loading.
 
 namespace aimbot_vars
 {
@@ -30,8 +29,8 @@ CONFIG_VARIABLE_RANGE(BacktrackTicks, aimbot_params::kBacktrackTicks);
 CONFIG_VARIABLE(WallCheck, bool, true);
 CONFIG_VARIABLE(Autowall, bool, false);
 
-// Stand down while smoked/flashed (friend request 2026-10-13): don't shoot
-// through a smoke volume or while blind - the target is invisible to you.
+// stand down while smoked/flashed: don't shoot through a smoke volume or
+// while blind.
 CONFIG_VARIABLE(IgnoreSmoke, bool, true);
 CONFIG_VARIABLE(IgnoreFlash, bool, true);
 

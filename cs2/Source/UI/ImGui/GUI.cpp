@@ -304,8 +304,16 @@ bool GUI::init() noexcept
     // ArcFastRadiusCutoff (default ~12px) corners render from the coarse 12-entry
     // fast-arc table - visibly polygonal on the small pills/toggles/chips, which
     // is exactly the "cheap corners" look. Zero cutoff => PathArcTo everywhere,
-    // segment count derived per radius from CircleSegmentMaxError.
+    // segment count derived per radius from CircleTessellationMaxError.
     ImGui::GetDrawListSharedData()->ArcFastRadiusCutoff = 0.0f;
+
+    // Smooth corners WITHOUT touching the radii: the default tessellation
+    // error (0.30px) only yields ~3-5 segments per 90-degree corner at menu
+    // radii (cards s(6..8), pills s(7)) - polygonal to the eye. 0.05px roughly
+    // triples the segment count. Applied straight to the shared data so it
+    // holds regardless of when ImGui::Initialize runs.
+    ImGui::GetStyle().CircleTessellationMaxError = 0.05f;
+    ImGui::GetDrawListSharedData()->SetCircleTessellationMaxError(0.05f);
 
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;

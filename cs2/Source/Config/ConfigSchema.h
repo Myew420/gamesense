@@ -766,8 +766,6 @@ private:
         configConversion.floating(u8"OffsetX", loadVariable<viewmodel_mod_vars::OffsetX>(), saveVariable<viewmodel_mod_vars::OffsetX>());
         configConversion.floating(u8"OffsetY", loadVariable<viewmodel_mod_vars::OffsetY>(), saveVariable<viewmodel_mod_vars::OffsetY>());
         configConversion.floating(u8"OffsetZ", loadVariable<viewmodel_mod_vars::OffsetZ>(), saveVariable<viewmodel_mod_vars::OffsetZ>());
-        configConversion.floating(u8"Pitch", loadVariable<viewmodel_mod_vars::Pitch>(), saveVariable<viewmodel_mod_vars::Pitch>());
-        configConversion.floating(u8"Roll", loadVariable<viewmodel_mod_vars::Roll>(), saveVariable<viewmodel_mod_vars::Roll>());
         configConversion.endObject();
 
         
@@ -1149,9 +1147,6 @@ private:
         configConversion.boolean(u8"DisableRagdolls", loadVariable<animation_mod_vars::DisableRagdolls>(), saveVariable<animation_mod_vars::DisableRagdolls>());
         configConversion.boolean(u8"ModifyRagdollScale", loadVariable<animation_mod_vars::ModifyRagdollScale>(), saveVariable<animation_mod_vars::ModifyRagdollScale>());
         configConversion.floating(u8"RagdollScale", loadVariable<animation_mod_vars::RagdollScale>(), saveVariable<animation_mod_vars::RagdollScale>());
-        configConversion.boolean(u8"AnimateViewmodel", loadVariable<animation_mod_vars::AnimateViewmodel>(), saveVariable<animation_mod_vars::AnimateViewmodel>());
-        configConversion.floating(u8"ViewmodelSpinSpeed", loadVariable<animation_mod_vars::ViewmodelSpinSpeed>(), saveVariable<animation_mod_vars::ViewmodelSpinSpeed>());
-        configConversion.floating(u8"ViewmodelPitchSway", loadVariable<animation_mod_vars::ViewmodelPitchSway>(), saveVariable<animation_mod_vars::ViewmodelPitchSway>());
         configConversion.endObject();
         configConversion.beginObject(u8"Chams");
         configConversion.boolean(u8"HideEnemies", loadVariable<chams_vars::HideEnemies>(), saveVariable<chams_vars::HideEnemies>());

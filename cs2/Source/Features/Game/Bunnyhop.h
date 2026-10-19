@@ -59,9 +59,7 @@ public:
             return reset();
 
         const bool jumpHeld = KeyboardState::isKeyDown(sdl3::scancode::kSpace);
-        // Auto-strafe rides the bhop feature (2026-10-13 friend report "auto
-        // strafe works even when the feature is off"): Bunnyhop off = the whole
-        // automation card's air-control off, Auto Strafe no longer self-runs.
+        // auto-strafe rides the bhop gate: Bunnyhop off = air control off
         const bool strafeEnabled = GET_CONFIG_VAR(BunnyhopEnabled) && jumpHeld
             && (GET_CONFIG_VAR(AutoStrafeEnabled) || GET_CONFIG_VAR(TestStraferEnabled));
         const bool bhopEnabled = GET_CONFIG_VAR(BunnyhopEnabled) && jumpHeld;
@@ -88,17 +86,15 @@ public:
         if (onGround.value())
             strafeSide = false;
 
-        // Auto-strafe also works when bhop is disabled or the server handles jumping.
-        // Holding movement or jump expresses intent; walking slowly remains manual.
+        // auto-strafe works even when bhop is off or sv_autobunnyhopping handles jumps
         using Buttons = cs2::CCSGOInput::Buttons;
         constexpr auto moveMask = Buttons::kForward | Buttons::kBack | Buttons::kMoveLeft | Buttons::kMoveRight;
         if (strafeEnabled && !onGround.value() && (jumpHeld || userCmd.isButtonDown(Buttons::kJump | moveMask)
                 || std::abs(userCmd.forwardMove().valueOr(0.0f)) > 0.001f
                 || std::abs(userCmd.leftMove().valueOr(0.0f)) > 0.001f)
             && !userCmd.isButtonDown(0x10000)) {
-            // steer() flips the side on every call, but CreateMove runs every
-            // frame and only the last frame of a command is sent: every frame of
-            // one command starts from the side the previous command ended on.
+            // steer() flips side per call but only the last frame of a command is sent;
+            // each command's frames start from the side the previous command ended on
             if (const int sequence = StrafeCommand::commandNumber(cmd); sequence != strafeSequence) {
                 strafeSequence = sequence;
                 strafeSideBase = strafeSide;
@@ -115,8 +111,7 @@ public:
         if (autoBhop.has_value() && autoBhop.value())
             return;
 
-        // Velocity gate: ladder/noclip movetypes stand down (m_nActualMoveType:
-        // ladder=9, noclip=7 - the CS2 MoveType_t from the dumper).
+        // ladder=9 / noclip=7 movetypes (m_nActualMoveType) stand down
         if (const auto moveType = pawnMoveType(); moveType == 9 || moveType == 7) {
             return reset();
         }
@@ -128,11 +123,9 @@ public:
                 hasPendingLanding = true;
             }
         }
-        // This is only the per-FRAME candidate (CreateMove runs every frame on the
-        // in-progress command). The decision that is actually sent is latched
-        // once per command in onWriteMoveCrc.
-        // A predicted landing stages the press at the landing subtick (not the
-        // next ground tick at when=1.0) - that keeps the hop frictionless.
+        // per-frame candidate only; the sent decision latches once per command in
+        // onWriteMoveCrc. a predicted landing stages the press at the landing
+        // subtick, keeping the hop frictionless
         wantsJump = onGround.value() || hasPendingLanding;
         hasPendingTap = wantsJump;
         hasPendingJump = true;
@@ -145,9 +138,8 @@ public:
     
     void onWriteMoveCrc(cs2::CUserCmd* cmd) const noexcept
     {
-        // The game rebuilds the command from the player's real input every
-        // frame, so this is the true movement intent - captured here, before
-        // the strafe commit below overwrites the scalars and the move buttons.
+        // the game rebuilds the cmd from real input every frame; capture intent
+        // here before the strafe commit below overwrites it
         if (const UserCmd real{cmd}; real) {
             using Buttons = cs2::CCSGOInput::Buttons;
             playerMove = {real.forwardMove().valueOr(0.0f), real.leftMove().valueOr(0.0f)};
@@ -160,13 +152,10 @@ public:
                 return;
         }
         const UserCmd userCmd{cmd};
-        // Issue #4 (2026-10-13, user breadcrumb): NO cross-hook cmd identity -
-        // CreateMove stages on its cmd (ring entry), WriteMoveCrc runs on a
-        // DIFFERENT cmd (the send-built one, 0x98 = one array slot away); the
-        // old pointer/base/sequence check discarded every staged jump ("fires
-        // 1-2 hops then stops" - only the coincidental same-pointer ticks
-        // fired). The tick boundary is already guaranteed by clearPending()
-        // at the top of onCreateMove; this writes ONLY the cmd handed here.
+        // no cross-hook cmd identity: CreateMove stages on the ring entry,
+        // WriteMoveCrc runs on the send-built cmd (0x98 = one slot away).
+        // write ONLY the cmd handed here; clearPending() at the top of
+        // onCreateMove already bounds the tick.
         if (!cmd || Movement<HookContext>::jumpBugActive) {
             clearPending();
             return;
@@ -183,25 +172,15 @@ public:
         
         if (hasPendingJump && GET_CONFIG_VAR(BunnyhopEnabled)) {
             using Moves = SubtickMoves<HookContext>;
-            // CreateMove and WriteMoveCrc run every FRAME on the in-progress
-            // command (~4 frames per tick at 250 fps), and the game rebuilds
-            // that command from its own input each frame: only the LAST
-            // frame's write is sent. A decision that changes between the
-            // frames of one command (the old per-frame press, then release)
-            // only went out when the press happened to sit on the last frame:
-            // "holding space jumps rarely" (per-frame file trace, 2026-10-12:
-            // every hop that fired had its press on the command's final frame).
-            // So the jump is latched once per command and re-applied
-            // identically on every frame of it.
-            //  - spacing: a press is at least two commands after the previous
-            //    one, which also clears sv_jump_spam_penalty_time (one tick).
-            //  - a landing press (when < 1.0) only latches on the command's
-            //    first frame: its fraction was measured on the previous frame,
-            //    so it can only be late (already on ground), never early.
-            //  - a ground press (when = 1.0) may latch on any frame.
-            //  - once latched for a command, a jump is never taken back.
-            // Airborne commands carry the release in the button banks only;
-            // the game's own real jump samples are never stripped.
+            // CreateMove/WriteMoveCrc run every frame on the in-progress command
+            // (~4 frames/tick at 250 fps) and only the LAST frame's write is
+            // sent, so the jump latches once per command and is re-applied on
+            // every frame of it.
+            //  - press spacing >= 2 commands (clears sv_jump_spam_penalty_time, one tick)
+            //  - landing press (when < 1.0) latches only on the command's first frame
+            //  - ground press (when = 1.0) may latch on any frame
+            //  - a latched jump is never taken back; airborne commands carry the
+            //    release in the button banks, real jump samples are never stripped
             const int sequence = StrafeCommand::commandNumber(cmd);
             const bool firstFrame = sequence != latchedSequence;
             if (firstFrame) {
@@ -232,9 +211,8 @@ public:
                 } else {
                     Moves::stripButtons(userCmd.baseMessage(), cs2::CCSGOInput::Buttons::kJump);
                 }
-                // The pair is appended after the game's real samples while a
-                // landing when is < 1.0: the engine walks the step array
-                // sequentially, so it must be re-sorted (stuck keys class).
+                // a landing when < 1.0 appends after the real samples; the
+                // engine walks the step array sequentially, so re-sort
                 Moves::sortByWhen(userCmd.baseMessage());
             }
         }
@@ -424,11 +402,9 @@ private:
         if (!parameters.valid())
             return {};
 
-        // CreateMove runs after WriteMoveCrc on the same command, so the command's
-        // own scalars and buttons already hold the previous strafe commit here.
-        // Steering toward them made the strafer chase its own output (constant
-        // left/right flicker once the strafe actually committed, e.g. on
-        // sv_autobunnyhopping servers). Use the intent captured at WriteMoveCrc.
+        // CreateMove runs after WriteMoveCrc, so the cmd's scalars/buttons hold
+        // the previous strafe commit here; steering toward them chases our own
+        // output. use the intent captured at WriteMoveCrc.
         const air_strafe::Move desired = playerMove;
         const int mouseDx = userCmd.mouseDx().valueOr(0);
         const bool legit = static_cast<std::uint8_t>(GET_CONFIG_VAR(AutoStrafeMode)) == 0;

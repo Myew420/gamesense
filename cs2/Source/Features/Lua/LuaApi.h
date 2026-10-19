@@ -1105,7 +1105,9 @@ inline int l_httpGet(lua_State* L)
         return luaL_error(L, "http.get: failed to write curl config");
     }
 
-    char command[1024];
+    // Fits the worst case: configPath + outPath x3 (all root-based paths,
+    // 352 bytes each) plus the curl command literal.
+    char command[4 * (ns_paths::kMaxPath + 32) + 96];
     std::snprintf(command, sizeof(command), "curl -s --max-time 20 -K '%s' -o '%s' && mv -f '%s' '%s'",
         configPath, slot->outPath, slot->outPath, slot->outPath);
     slot->pid = spawnHostShell(command);
@@ -1212,7 +1214,9 @@ inline int l_httpRequest(lua_State* L)
         return luaL_error(L, "http.request: failed to write curl config");
     }
 
-    char command[1024];
+    // Fits the worst case: configPath + outPath x3 (all root-based paths,
+    // 352 bytes each) plus the curl command literal.
+    char command[4 * (ns_paths::kMaxPath + 32) + 96];
     std::snprintf(command, sizeof(command), "curl -s --max-time 20 -K '%s' -o '%s' && mv -f '%s' '%s'",
         configPath, slot->outPath, slot->outPath, slot->outPath);
     slot->pid = spawnHostShell(command);
@@ -2226,7 +2230,7 @@ static bool resolveSteamApi() noexcept
     
     const LinuxDynamicLibrary steamLib{steamApiPath};
     if (!steamLib) {
-        std::snprintf(steamApi.lastError, sizeof(steamApi.lastError), "could not dlopen %s (NOLOAD miss)", steamApiPath);
+        std::snprintf(steamApi.lastError, sizeof(steamApi.lastError), "could not dlopen %.100s (NOLOAD miss)", steamApiPath);
         VerifyConsole::write(1.0f, "lua", "steam: %s", steamApi.lastError);
         luaSteamLog("lua: steam resolve: %s", steamApi.lastError);
         return false;

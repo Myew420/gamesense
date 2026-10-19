@@ -11,13 +11,10 @@
 #include <GameClient/UserCmd.h>
 #include <HookContext/HookContextMacros.h>
 
-// Doubletap (velocity rage.cpp process_doubletap): a charge/fire machine that
-// holds every attack while the weapon is on cooldown, then fires the moment
-// client_tick >= m_nNextPrimaryAttackTick with the attack stamped onto the
-// weapon's next-attack tick - the server processes the shot at the retarded
-// tick, so the follow-up lands nearly one tick later (2 shots, 1 window).
-// Stage 0 research: stock servers are vulnerable (HvH.gg ships a server-side
-// fix), HvH-configured ones mitigate.
+// doubletap: holds the attack while the weapon is on cooldown, fires when
+// client_tick >= m_nNextPrimaryAttackTick with the history entries stamped
+// at the next-attack tick (2 shots, 1 tick window). stock servers are
+// vulnerable, HvH-configured ones mitigate.
 namespace double_tap
 {
 
@@ -106,12 +103,10 @@ inline void reset() noexcept
 }
 
 }
-// The per-tick gate. Runs at WriteMoveCrc AFTER the aimbot/triggerbot writers
-// (it must see every fire intent, including the aimbot's force-shot press)
-// and BEFORE the anti-aim apply (hide-shots reads the final fire state).
-// Charging strips the attack from the command - the tick the weapon is ready,
-// the attack flows through as a fresh server-side edge with the entries
-// stamped at the retarded tick.
+// per-tick gate at WriteMoveCrc: AFTER the aimbot/triggerbot writers (must
+// see every fire intent), BEFORE anti-aim (hide-shots reads the final fire
+// state). charging strips the attack; when ready it flows through with the
+// entries stamped at the next-attack tick.
 template <typename HookContext>
 class DoubleTapGate {
 public:

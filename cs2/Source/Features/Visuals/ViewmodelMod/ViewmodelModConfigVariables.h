@@ -17,7 +17,4 @@ CONFIG_VARIABLE_RANGE(OffsetX, viewmodel_mod_params::kOffsetX);
 CONFIG_VARIABLE_RANGE(OffsetY, viewmodel_mod_params::kOffsetY);
 CONFIG_VARIABLE_RANGE(OffsetZ, viewmodel_mod_params::kOffsetZ);
 
-CONFIG_VARIABLE_RANGE(Pitch, viewmodel_mod_params::kRotation);
-CONFIG_VARIABLE_RANGE(Roll, viewmodel_mod_params::kRotation);
-
 }

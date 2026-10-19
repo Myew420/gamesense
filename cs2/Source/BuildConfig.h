@@ -23,9 +23,8 @@ constexpr std::basic_string_view kConfigDirectoryName{WIN64_LINUX(L"configs", "c
 
 
 
-// Save/load scratch buffer. Must fit a FULL config file: the per-weapon rage
-// configs (RageGroups, 32 weapons x 17 keys on top of everything else) pushed
-// the saved document past the old 16 KiB on 2026-10-10.
+// save/load scratch buffer: must fit a FULL config file
+// (rage groups pushed the document past 16 KiB).
 constexpr auto kConfigFileBufferSize{65536};
 
 }

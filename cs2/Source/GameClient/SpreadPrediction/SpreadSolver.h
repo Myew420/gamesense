@@ -53,8 +53,8 @@ public:
         return fn(nullptr, &vector, tick);
     }
 
-    // CalculateSpread changed ABI on 2026-09-27. The legacy nine-argument
-    // binding must NEVER be called. Unknown spread is not a zero vector.
+    // CalculateSpread changed ABI; the legacy nine-argument binding must never
+    // be called. unknown spread is not a zero vector.
     Optional<cs2::Vector> spreadOffset(std::uint32_t, const WeaponSpreadParams& params) const noexcept
     {
         if (valid(params) && params.inaccuracy + params.spread == 0.0f)

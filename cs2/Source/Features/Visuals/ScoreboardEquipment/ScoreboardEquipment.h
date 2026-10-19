@@ -23,14 +23,11 @@
 #include <SDL/SdlFunctions.h>
 #include <Utils/Optional.h>
 
-// Scoreboard equipment reveal (ported from the reference Windows implementation): draws every
-// player's carried weapons as icon rows next to their names ON THE GAME'S OWN SCOREBOARD via
-// Panorama JS (RunScript into the HUD root). Native side walks player controllers, resolves
-// weapon icon paths from the weapons' VData names ("weapon_ak47" -> "icons/equipment/ak47.svg"),
-// adds armor/defuser from the pawn's item services, dedupes, sorts, and pushes per-player
-// updates into the JS (SWeaponManager) installed once per session. Only sends when a player's
-// set actually changed. All work happens on the game thread (render start) - RunScript is the
-// engine's own JS entry, same thread the game runs panorama on.
+// scoreboard equipment icons via panorama JS (RunScript into the HUD root):
+// icon paths from the weapons' VData names ("weapon_ak47" ->
+// "icons/equipment/ak47.svg"), armor/defuser from the item services; JS
+// (SWeaponManager) installed once per session, updates only on change, all
+// on the game thread (render start).
 template <typename HookContext>
 class ScoreboardEquipment {
 public:
@@ -57,9 +54,8 @@ public:
         if (++throttleCounter % kThrottle != 0)
             return;
 
-        // Only walk + push while the scoreboard is up (TAB held): the icons live on the
-        // scoreboard rows, and the entity walk (every pawn, every weapon, VData name read)
-        // at 10Hz is what made deathmatch feel like it "slowly loads every player".
+        // only walk + push while the scoreboard is up (TAB held): the entity
+        // walk at 10Hz is too costly to run always.
         if (!KeyboardState::isKeyDown(sdl3::scancode::kTab))
             return;
 
@@ -74,8 +70,7 @@ public:
         if (!offsetsReady())
             return;
 
-        // All changed players batch into ONE RunScript per cycle (each receive() updates
-        // one row) - one JS parse instead of one per player.
+        // all changed players batch into ONE RunScript per cycle.
         batchLength = 0;
         hookContext.template make<EntitySystem>().forEachNetworkableEntityIdentity([&](const auto& entityIdentity) {
             const auto entityTypeInfo = hookContext.entityClassifier().classifyEntity(entityIdentity.entityClass);
@@ -148,8 +143,8 @@ private:
         return name;
     }
 
-    // The reference's icon resolution: the VData name minus the "weapon_" prefix is the
-    // equipment icon name (usp_silencer -> usp_silencer.svg, knife_karambit -> knife_karambit.svg).
+    // icon resolution: VData name minus the "weapon_" prefix is the icon
+    // name (usp_silencer -> usp_silencer.svg).
     [[nodiscard]] static bool buildIconPath(char* out, std::size_t capacity, const char* vdataName) noexcept
     {
         const char* stripped = stripWeaponPrefix(vdataName);
@@ -353,8 +348,7 @@ private:
         std::snprintf(out + offset, capacity - offset, "],active_path:\"%s\"}});", activePath);
     }
 
-    // Runs one JS string on the HUD root panel (the context $.GetContextPanel() returns to
-    // the scoreboard JS). The engine wrapper null-checks the engine + pattern itself.
+    // runs one JS string on the HUD root panel; the engine wrapper null-checks itself.
     [[nodiscard]] bool runScript(const char* script) const noexcept
     {
         auto&& hudRoot = hookContext.hud().rootPanel();
@@ -406,9 +400,8 @@ private:
         "if(typeof SWeaponManager!=='undefined')SWeaponManager.clear();"
     };
 
-    // The reference's scoreboard JS, verbatim: installs SClient/SWeaponManager into the
-    // scoreboard panel's JS context, widens the scoreboard + name columns, and creates the
-    // per-player weapon icon rows (id-sb-name__nameicons container) with per-weapon sizing.
+    // scoreboard JS: installs SClient/SWeaponManager, widens the scoreboard +
+    // name columns, creates the per-player icon rows (id-sb-name__nameicons).
     static constexpr const char* kInitScript{
         "(function () {"
         "if (typeof SClient !== \"undefined\") SClient = undefined;"

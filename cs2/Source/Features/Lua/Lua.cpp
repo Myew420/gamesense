@@ -984,7 +984,8 @@ static bool preloadLibs(lua_State* L) noexcept
     if (!dir)
         return true; 
     constexpr int kMaxLibs = 16;
-    char paths[kMaxLibs][768];
+    // Fits libDir (600) + '/' + a dirent name (d_name is at most 255 bytes).
+    char paths[kMaxLibs][900];
     int count = 0;
     while (count < kMaxLibs) {
         const dirent* entry = ::readdir(dir);

@@ -84,9 +84,8 @@ TEST_F(ConfigWorkflowTest, LoadingPartialDocumentResetsAbsentSettingsToDefaults)
     EXPECT_EQ(static_cast<int>(cfg.getVariable<legit_aimbot_vars::Mode>()), 0);
     EXPECT_TRUE(cfg.lastLoadSucceeded());
 }
-// A file saved by an OLDER schema revision (extra keys, renamed keys, extra
-// nested objects) must load: unknown keys are skipped, not fatal (2026-10-10
-// default.cfg brick: strict walker stalled on BulletTracers leftovers).
+// older-schema files (extra/renamed keys, extra nested objects) must load:
+// unknown keys are skipped, not fatal.
 TEST_F(ConfigWorkflowTest, LoadingDocumentWithOlderSchemaLeftoversSkipsUnknownKeys) {
     auto& cfg = context->cfg;
     write("oldrev.cfg", R"({"LegacyTopLevel":{"Stuff":true},"Combat":{"LegitAimbot":{"Enabled":true,"RemovedSetting":5,"RenamedOld":{"Inner":false}},"GhostObject":{"A":1}},"Visuals":{"Hitmarker":{"Enabled":true,"OldColor":4294932670}},"Sound":{"Visualizations":{"ImpactMarkers":{"Enabled":true}}}})");

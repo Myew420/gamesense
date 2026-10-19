@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Hooks/ViewmodelRotationHook.h>
-#include <Features/Visuals/ViewmodelMod/ViewmodelRotation.h>
 #include <UI/ImGui/MenuInput.h>
 
 #include "GlobalContext/HookQuiesce.h"
@@ -411,9 +409,8 @@
         StatusReport::record("TeamSelect event null-guard NOT installed (crash workaround inactive)", false);
 
     (void)chams_hook::install();
-    static_cast<void>(viewmodel_rotation_hook::install());
-    
-    
+
+
     static_cast<void>(netlag_hook::install());
 }
 
@@ -491,7 +488,6 @@ int SDLHook_PeepEvents(void* events, int numevents, int action, unsigned minType
     scene_render_hooks::uninstall();
     team_select_guard::uninstall();
     chams_hook::uninstall();
-    viewmodel_rotation_hook::uninstall();
     netlag_hook::unload();
     hookContext.hooks().viewRenderHook.uninstall();
     hookContext.hooks().source2ClientHook.uninstall();
@@ -507,6 +503,7 @@ int SDLHook_PeepEvents(void* events, int numevents, int action, unsigned minType
     hookContext.template make<RadarEsp<HookContext<GlobalContext>>>().onUnload();
     hookContext.template make<BombInfoEsp<HookContext<GlobalContext>>>().onUnload();
     hookContext.template make<GrenadePredictionEsp<HookContext<GlobalContext>>>().onUnload();
+    hookContext.template make<BulletTracers>().onUnload();
     hookContext.template make<BulletImpacts>().onUnload();
     hookContext.template make<SpectatorSync<HookContext<GlobalContext>>>().onUnload();
     event_log::onUnload();
@@ -554,21 +551,6 @@ int SDLHook_PeepEvents(void* events, int numevents, int action, unsigned minType
 
 void Source2ClientHook_onFrameStageNotify(cs2::CSource2Client* thisptr, int frameStage) noexcept
 {
-    
-    {
-        static std::uint32_t fsnCalls = 0;
-        static std::int64_t lastLogNs = 0;
-        ++fsnCalls;
-        timespec ts{};
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        const std::int64_t nowNs = static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
-        if (lastLogNs == 0 || nowNs - lastLogNs > 10'000'000'000LL) {
-            lastLogNs = nowNs;
-            gui_log::write("[chaindiag] fsn alive, calls=%u lastStage=%d", fsnCalls, frameStage);
-        }
-    }
-    
-    
     const bool shuttingDown = HookQuiesce::isShuttingDown();
     if (shuttingDown && !HookContext<GlobalContext>::isGlobalContextComplete())
         return;
@@ -701,19 +683,6 @@ static int buildLuaEventArgs(lua::EventArg* out, const char* eventName, cs2::IGa
 
 bool GameEventManagerHook_onFireEventClientSide(cs2::IGameEventManager2* thisptr, cs2::IGameEvent* event) noexcept
 {
-    
-    {
-        static std::uint32_t gemEvents = 0;
-        static std::int64_t lastLogNs = 0;
-        ++gemEvents;
-        timespec ts{};
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        const std::int64_t nowNs = static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
-        if (lastLogNs == 0 || nowNs - lastLogNs > 10'000'000'000LL) {
-            lastLogNs = nowNs;
-            gui_log::write("[chaindiag] gem alive, events=%u", gemEvents);
-        }
-    }
     const bool shuttingDown = HookQuiesce::isShuttingDown();
     if (shuttingDown && !HookContext<GlobalContext>::isGlobalContextComplete())
         return true;
@@ -778,22 +747,6 @@ bool GameEventManagerHook_onFireEventClientSide(cs2::IGameEventManager2* thisptr
 
 void CSGOInputHook_onCreateMove(cs2::CCSGOInput* thisptr, int slot, cs2::CUserCmd* cmd) noexcept
 {
-    {
-        static std::uint32_t createMoveCalls = 0;
-        static std::int64_t lastLogNs = 0;
-        ++createMoveCalls;
-        timespec ts{};
-        clock_gettime(CLOCK_MONOTONIC, &ts);
-        const std::int64_t nowNs = static_cast<std::int64_t>(ts.tv_sec) * 1'000'000'000LL + ts.tv_nsec;
-        if (lastLogNs == 0 || nowNs - lastLogNs > 10'000'000'000LL) {
-            lastLogNs = nowNs;
-            gui_log::write("[chaindiag] createmove alive, calls=%u slot=%d", createMoveCalls, slot);
-        }
-    }
-
-
-
-
     CrashLogger::trace(0x370);
     const bool shuttingDown = HookQuiesce::isShuttingDown();
     if (shuttingDown && !HookContext<GlobalContext>::isGlobalContextComplete())
@@ -801,8 +754,7 @@ void CSGOInputHook_onCreateMove(cs2::CCSGOInput* thisptr, int slot, cs2::CUserCm
 
     HookQuiesce::InFlight flight;
     HookContext<GlobalContext> hookContext;
-    // The engine input object feeds Movement::engineViewAngles() (camera state,
-    // FastLadder math) - captured from the hook thisptr every frame.
+    // engine input object feeds Movement::engineViewAngles(); captured from thisptr every frame.
     hookContext.template make<Movement>().captureInput(thisptr);
     hookContext.hooks().csgoInputHook.getOriginalCreateMove()(thisptr, slot, cmd);
     if (shuttingDown)
@@ -854,9 +806,8 @@ void CSGOInputHook_onCreateMove(cs2::CCSGOInput* thisptr, int slot, cs2::CUserCm
     
     hookContext.template make<TestStrafer>().onCreateMove(cmd);
 
-    // Grenade ESP produces on the GAME thread: the trajectory reads view
-    // angles + velocity + runs traces, all of which tear mid-tick if read on
-    // the render thread (the first cut's glitchy random-angle lines).
+    // grenade ESP produces on the GAME thread: the trajectory reads view
+    // angles + velocity + traces, which tear mid-tick on the render thread.
     hookContext.template make<GrenadePredictionEsp<HookContext<GlobalContext>>>().run();
 
 
@@ -883,18 +834,15 @@ void CSGOInputHook_onCreateMove(cs2::CCSGOInput* thisptr, int slot, cs2::CUserCm
     
     hookContext.template make<AgentChanger>().run();
 
-    // Chams runtime materials: create the vmat set ONCE on the main thread while the
-    // feature is enabled (see the THREAD RULE note in chams_hook::onGeneratePrimitives).
+    // chams materials: create the vmat set ONCE on the main thread
+    // (see chams_hook::onGeneratePrimitives).
     if ((GET_CONFIG_VAR(chams_vars::Enabled)
             || GET_CONFIG_VAR(chams_vars::ViewmodelEnabled)
             || GET_CONFIG_VAR(chams_vars::OwnWeaponsEnabled))
-        && chams_materials::needsCreation()) {
-        if (chams_materials::ensureMaterialsCreated())
-            VerifyConsole::write(0.0f, "chams-mat", "materials ready");
-        else
-            VerifyConsole::write(0.0f, "chams-mat", "creation failed: %s (color-only fallback)",
-                chams_materials::lastError());
-    }
+        && chams_materials::needsCreation()
+        && !chams_materials::ensureMaterialsCreated())
+        VerifyConsole::write(0.0f, "chams-mat", "creation failed: %s (color-only fallback)",
+            chams_materials::lastError());
 
     
     
@@ -1001,10 +949,12 @@ std::uint64_t CSGOInputHook_onWriteMoveCrc(cs2::CCSGOInput* thisptr, cs2::CUserC
         
         
         hookContext.template make<Aimbot>().onWriteMoveCrc(cmd);
-        // Doubletap gate: after the aimbot/triggerbot writers (sees every fire
-        // intent). The anti-aim no longer writes at slot 7 - it arms the FVA
-        // target at CreateMove (camera-safe synthetic history entries).
+        // doubletap gate: after the aimbot/triggerbot writers (sees every fire intent).
         hookContext.template make<DoubleTapGate<HookContext<GlobalContext>>>().onWriteMoveCrc(cmd);
+        // anti-aim writes base viewangles here: writes in CreateMove travel
+        // with a stale checksum and the server drops them. real angles are
+        // restored right after the original call below.
+        hookContext.template make<AntiAim<HookContext<GlobalContext>>>().onWriteMoveCrc(cmd);
         hookContext.template make<LegitAimbot>().onWriteMoveCrc(cmd);
         
         
@@ -1023,7 +973,16 @@ std::uint64_t CSGOInputHook_onWriteMoveCrc(cs2::CCSGOInput* thisptr, cs2::CUserC
             SubtickMoves<HookContext<GlobalContext>>::stripAnalog(UserCmd{cmd}.baseMessage());
     }
     CrashLogger::trace(0x375);
-    return hookContext.hooks().csgoInputHook.getOriginalWriteMoveCrc()(thisptr, cmd);
+
+    // save/restore the command's real angles around the original call: it
+    // serializes + CRCs the (possibly faked) angles; the local view must not
+    // follow them.
+    const UserCmd saveRestoreCmd{cmd};
+    const auto savedAngles = saveRestoreCmd.readRawViewAngles();
+    const auto result = hookContext.hooks().csgoInputHook.getOriginalWriteMoveCrc()(thisptr, cmd);
+    if (savedAngles.hasValue())
+        saveRestoreCmd.restoreRawViewAngles(savedAngles.value());
+    return result;
 }
 
 void ViewRenderHook_onRenderStart(cs2::CViewRender* thisptr) noexcept
@@ -1091,6 +1050,7 @@ void ViewRenderHook_onRenderStart(cs2::CViewRender* thisptr) noexcept
     hookContext.template make<BombInfoEsp<HookContext<GlobalContext>>>().run();
     hookContext.template make<AntiAim<HookContext<GlobalContext>>>().onRenderUpdate();
     hookContext.template make<KillEffects>().run();
+    hookContext.template make<BulletTracers>().run();
     hookContext.template make<BulletImpacts>().run();
     hookContext.template make<PlayerList>().run();
     hookContext.template make<ScoreboardEquipment>().run();
@@ -1128,8 +1088,7 @@ void ViewRenderHook_onRenderStart(cs2::CViewRender* thisptr) noexcept
     
     
     
-    // gamesneeze-style console banner: the NS logo once, ahead of the status
-    // lines (console output only - the gui.log contract stays anomaly-only).
+    // console banner: NS logo once, ahead of the status lines; gui.log stays anomaly-only.
     console_banner::printOnce();
 
     StatusReport::dumpOnce([](const char* message, bool ok) {
@@ -1195,7 +1154,6 @@ void ViewRenderHook_onRenderStart(cs2::CViewRender* thisptr) noexcept
         
         
         HookQuiesce::drainInFlightCallbacks();
-        viewmodel_rotation_hook::releaseRelay();
 
         
         
@@ -1424,9 +1382,7 @@ void chams_hook::onSceneObjectDrawArray(void* desc, void* renderContext, void* p
             const bool overlayTarget = chams.wantsOverlayPass(sceneObject);
             const bool targetIsEnemy = chams.overlayPassIsEnemy(sceneObject);
 
-            // Hide models: skipping the original call = the mesh never draws (superior
-            // to the old GeneratePrimitives count rollback, and it finally covers
-            // bodies - the draw-side call is the one that matters).
+            // hide models: skipping the original call means the mesh never draws.
             if ((hideEnemies && overlayTarget && targetIsEnemy)
                 || (hideLocal && chams.ownsLocalPawn(sceneObject)))
                 return;
@@ -1442,12 +1398,8 @@ void chams_hook::onSceneObjectDrawArray(void* desc, void* renderContext, void* p
                 const auto occludedColor = Chams<HookContext<GlobalContext>>::primitiveColor(
                     targetIsEnemy ? GET_CONFIG_VAR(chams_vars::EnemyOccludedColor) : GET_CONFIG_VAR(chams_vars::TeamOccludedColor));
 
-                // The material write happens HERE, at draw time, because the game
-                // re-binds prim+0x20 back to the entity's own material between
-                // GeneratePrimitives and the draw (2026-10-17 live gdb round). This is
-                // also how both public references do it: xsip hooks the Render call,
-                // FrameworkCS2 hooks this exact DrawArray and swaps the material
-                // before calling the trampoline.
+                // material write happens at draw time: the game re-binds prim+0x20
+                // to the entity's own material between GeneratePrimitives and here.
                 if (visibleMaterial && (!drawOccluded || occludedMaterial)) {
                     if (drawOccluded) {
                         Chams<HookContext<GlobalContext>>::applyMaterialOverrideRange(primitives, primitiveCount,
@@ -1501,10 +1453,8 @@ void chams_hook::onGeneratePrimitives(void* desc, void* sceneObject, void* scene
     auto&& chams = hookContext.template make<Chams>();
 
     
-    // Atomic: the GeneratePrimitives hook itself can run on several render threads
-    // (the 2026-10-17 diag showed DrawArray firing on 6+ threads), and the flicker bug
-    // was this counter plus the in-place rebuild racing them. The refresh is now
-    // single-writer + double-buffered inside Chams; this counter just paces it.
+    // GeneratePrimitives can run on several render threads; the refresh is
+    // single-writer + double-buffered inside Chams, this counter just paces it.
     if (chamsCallsUntilSnapshot.fetch_sub(1, std::memory_order_relaxed) <= 1) {
         chams.refreshLivePawnPointers();
         chamsCallsUntilSnapshot.store(Chams<HookContext<GlobalContext>>::kSnapshotRefreshInterval, std::memory_order_relaxed);
@@ -1512,11 +1462,8 @@ void chams_hook::onGeneratePrimitives(void* desc, void* sceneObject, void* scene
 
     const auto previousCount = Chams<HookContext<GlobalContext>>::primitiveCount(primitives);
     RetAddrSpoofer::spoof(original)(desc, sceneObject, sceneView, primitives);
-    // Own viewmodel chams (first-person hands + weapon). The viewmodel draws through
-    // the libscenesystem descs, so the real-material override applies. Single pass -
-    // no occluded variant for your own hands. Materials are THE chams now (the old
-    // color-only path is gone): if creation failed, the status line on the Chams page
-    // shows the verdict and nothing draws (fail-closed).
+    // own viewmodel chams (hands + weapon), single pass, no occluded variant.
+    // fail-closed: no materials = nothing draws.
     if (viewmodelChamsEnabled && chams.isPartOfViewmodel(sceneObject)) {
         if (chams_materials::materialsReady()) {
             const auto materialType = static_cast<chams_materials::Type>(
@@ -1531,10 +1478,10 @@ void chams_hook::onGeneratePrimitives(void* desc, void* sceneObject, void* scene
         return;
     }
 
-    // Own weapons chams - the LOCAL player's weapon models as rendered attached to the
-    // character (third person / shadows). Distinguished from the viewmodel layer by the
-    // scene-object flag and from the local BODY by the desc class (skeletal bodies
-    // cannot take the per-prim material override - see the enemy branch note).
+    // own weapons chams: local player's weapon models attached to the character
+    // (third person / shadows). distinguished from the viewmodel by the
+    // scene-object flag, from the body by the desc class (skeletal bodies
+    // cannot take per-prim material overrides).
     if (ownWeaponsEnabled
         && !chams.isPartOfViewmodel(sceneObject)
         && chams.ownsLocalPawn(sceneObject)) {
@@ -1551,37 +1498,13 @@ void chams_hook::onGeneratePrimitives(void* desc, void* sceneObject, void* scene
         return;
     }
 
-    // Enemy/team chams and player-model hiding moved to the DRAW side
-    // (chams_hook::onSceneObjectDrawArray): the game re-binds the primitive material
-    // between generation and the draw, so writing it here never reached the body
-    // draws - 2026-10-17 live round. This hook keeps the viewmodel + own-weapon
-    // material passes (both proven to survive - the viewmodel/body rebinding does
-    // not affect them) and the world recolor.
+    // enemy/team chams + hiding happen at draw time (onSceneObjectDrawArray):
+    // the game re-binds primitive materials between generation and draw, so
+    // writes here never reach the body draws. this hook keeps the viewmodel +
+    // own-weapon passes and the world recolor.
     if (worldModEnabled && primitives && !chams.ownsLocalPawn(sceneObject))
         Chams<HookContext<GlobalContext>>::applyOverlay(primitives, previousCount,
             Chams<HookContext<GlobalContext>>::primitiveColor(GET_CONFIG_VAR(WorldColorsWorldColor)));
 }
 
 
-
-void viewmodel_rotation_hook::onUpdatePose(void* model, cs2::Vector* position, cs2::Vector* angles) noexcept
-{
-    HookQuiesce::InFlight flight;
-    // The original writes bob and positional offsets into this frame's private pose.
-    original(model, position, angles);
-    if (HookQuiesce::isShuttingDown() || !angles
-        || !HookContext<GlobalContext>::isGlobalContextComplete())
-        return;
-    HookContext<GlobalContext> hookContext;
-    if (GET_CONFIG_VAR(animation_mod_vars::AnimateViewmodel)) {
-        const float time = hookContext.globalVars().curtime().valueOr(0.0f);
-        if (std::isfinite(time)) {
-            angles->z += std::remainder(time * static_cast<float>(GET_CONFIG_VAR(animation_mod_vars::ViewmodelSpinSpeed)), 360.0f);
-            angles->x += std::sin(time * 3) * static_cast<float>(GET_CONFIG_VAR(animation_mod_vars::ViewmodelPitchSway));
-        }
-    }
-    if (GET_CONFIG_VAR(viewmodel_mod_vars::ModifyPosition))
-        *angles = viewmodel_rotation::apply(*angles,
-            static_cast<float>(GET_CONFIG_VAR(viewmodel_mod_vars::Pitch)),
-            static_cast<float>(GET_CONFIG_VAR(viewmodel_mod_vars::Roll)));
-}

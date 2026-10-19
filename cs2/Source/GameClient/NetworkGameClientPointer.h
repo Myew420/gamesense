@@ -6,21 +6,12 @@
 #include <CS2/Constants/DllNames.h>
 #include <Platform/DynamicLibrary.h>
 
-// Resolves the live CNetworkGameClient (the game's net session) via the engine2 global that
-// cs2-dumper records as dwNetworkGameClient (libengine2.so + 0xA477C0 on build 14189 - a raw
-// RVA, so every use validates the object before anything is called through it: the object's
-// own vtable must sit inside libengine2's vmt range and the tick field must read as a plausible
-// tick count). The ServerLagger is the first consumer.
-//
-// The object is heap-allocated by the engine once a server connection exists and FREED on
-// disconnect - which is why nothing here caches the client pointer: every construction re-reads
-// the global and revalidates, so a stale object can never be dereferenced. Only the immutable
-// module base + vmt range are cached once (getVmtSection() open()s and mmap()s the module file,
-// so it must never run per tick).
-//
-// Layout facts verified against the live process + disassembly (updated 2026-10-06, build 11087116):
-//   client tick field  = +0x3A8 (vtable slot 5 body: mov eax, [rdi+0x3A8]; was +0x388 pre-5GB-update)
-//   channel array      = +0xF0, 24-byte stride, GetChannel(slot) = vtable slot 41
+// resolves the live CNetworkGameClient via the engine2 global cs2-dumper records as
+// dwNetworkGameClient (raw RVA, so the object is validated before every use). freed on
+// disconnect, so the pointer is never cached; only the module base + vmt range are
+// (getVmtSection() mmaps, never per tick).
+// layout: tick field = +0x3A8 (was +0x388 pre-5GB-update); channel array = +0xF0,
+// 24-byte stride, GetChannel(slot) = vtable slot 41.
 struct NetworkGameClientPointer {
     NetworkGameClientPointer() noexcept
         : pointer{resolve()}
@@ -37,10 +28,8 @@ struct NetworkGameClientPointer {
         return pointer;
     }
 
-    // Fail-closed sanity on a live client object: its vtable must point back into libengine2's
-    // vmt range (the same fail-safe the other interface pointers in this project use) and the
-    // tick field must read as a plausible tick count (guards against a stale/garbage RVA after
-    // a game update - a shifted .data qword would read some unrelated non-null value).
+    // fail-closed sanity: vtable must sit in libengine2's vmt range and the tick field
+    // must read as a plausible tick (guards against a stale RVA after a game update).
     [[nodiscard]] bool valid() const noexcept
     {
         return validate(pointer);
@@ -51,11 +40,9 @@ private:
     {
         if (!client)
             return false;
-        // Non-canonical pointer guard (2026-10-15 crash): a stale RVA reads some
-        // unrelated .data qword, and on this update it was NON-CANONICAL
-        // (0xc00001000000002a) - dereferencing it for the vtable check was a #GP
-        // (si_code 0x80) before any sanity could run. Reject non-canonical values
-        // FIRST so drift stays fail-closed instead of crashing the guard.
+        // reject non-canonical pointers first: a stale RVA can read a non-canonical
+        // .data qword, and dereferencing it for the vtable check is a #GP before any
+        // other sanity runs.
         const auto address = reinterpret_cast<std::uintptr_t>(client);
         if (address >= 0x0000800000000000ULL && address < 0xffff800000000000ULL)
             return false;
@@ -100,10 +87,9 @@ private:
         return client;
     }
 
-    // libengine2.so dwNetworkGameClient, cs2-dumper build 14191 (2026-10-15 dump; was 0xA477C0
-    // on 14189, the 10-15 update moved it +0x200 and the stale RVA read a non-canonical qword
-    // whose validate() dereference #GP'd). RE-DERIVE on any CS2 update: valid() fails closed
-    // on drift instead of calling through garbage.
+    // libengine2.so dwNetworkGameClient RVA (previous value 0xA477C0; an update moved it
+    // +0x200 and the stale RVA read a non-canonical qword). re-derive on any CS2 update;
+    // valid() fails closed on drift.
     static constexpr std::uintptr_t kNetworkGameClientRva = 0xA479C0;
 
     void* pointer{nullptr};

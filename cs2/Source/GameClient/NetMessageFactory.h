@@ -7,35 +7,16 @@
 #include <CS2/Constants/DllNames.h>
 #include <GameClient/NetworkMessagesPointer.h>
 
-// NetMessageFactory - the shared "send a real net message through the game's own net channel"
-// machinery, extracted from the Server Lagger (2026-09-13) so any feature can ride it.
-//
-// Chain per send (every Windows vcall number re-derived and verified on Linux - NEVER trust the
-// friend's Windows numbers 1:1, MSVC<->Itanium slots are per-class shifted):
-//   NetworkMessagesVersion001 (libnetworksystem CreateInterface) -> CNetworkMessages manager
-//   findRecord(typeId) [manager slot 30] -> record; info(record) [slot 12] = record+0x10;
-//   binding = *(info+8); create [binding slot 6] -> 0x60-byte message object;
-//   parse via ReadFromBuffer [manager slot 4] from a bit_read_t wrapping
-//   varint(payloadSize) + payload + 4 zero slack bytes;
-//   CNetChan::SendNetMessage [slot 40] (channel, message, -1) queues the message bits;
-//   commit [slot 43] (no args) seals all 3 stream buffers' write cursors;
-//   SendData [slot 42] (this, name, nullptr) builds + transmits a datagram from committed data.
-//   Message clone = slot 5 (Itanium copy ctor; slot 4 is a getter here), destroy = slot 1
-//   (Itanium D2 deleting dtor - slot 0 D1 would leak).
-//
-// Consumers: ServerLagger (CCLCMsg_VoiceData, record 22), UserInfoFlood direct mode
-// (CNETMsg_SetConVar, record 6 - the client->server userinfo cvar update, schema verified
-// against the embedded protobuf descriptors: CNETMsg_SetConVar { optional CMsg_CVars
-// convars = 1; } / CMsg_CVars { repeated CVar cvars = 1; } / CVar { name = 1; value = 2; }).
-//
-// Every object's vtable is validated against the owning module before any slot is called
-// (NetworkMessagesPointer / NetworkGameClientPointer). Failures return null/false - features
-// latch fail closed and log; no wild vtable calls ever.
+// send a real net message through the game's own net channel.
+// chain: NetworkMessagesVersion001 (libnetworksystem) manager -> findRecord -> info ->
+// binding -> create -> ReadFromBuffer -> CNetChan SendNetMessage -> commit -> SendData.
+// slot indexes in the kSlot* constants below (byte offsets = slot * 8); windows vcall
+// numbers do not map 1:1 (MSVC vs Itanium). every vtable is validated against the owning
+// module before any call; failures return null/false and features latch fail closed.
 namespace net_messages
 {
 
-// bit_read_t: the engine's S1-heritage bit reader, layout friend-verified against the Linux
-// ReadFromBuffer disassembly (data_bits @ +0xC, current_bit @ +0x10, overflow @ +0x20).
+// engine bit_read_t layout: data_bits @ +0xC, current_bit @ +0x10, overflow @ +0x20.
 struct BitRead {
     const void* data;
     std::int32_t dataBytes;
@@ -50,8 +31,7 @@ struct BitRead {
 };
 static_assert(sizeof(BitRead) == 0x28);
 
-// Serialize-size sanity ceiling: a healthy parsed payload serializes to at most this many bytes.
-// Anything bigger means the parse corrupted a length field (the 2026-09-12 233MB serialize wedge).
+// serialize-size sanity ceiling; bigger = the parse corrupted a length field.
 inline constexpr std::uint32_t kMaxSaneSerializeBytes = 32 * 1024;
 
 // Verified Linux slot indexes (byte offsets = slot * 8).
@@ -67,8 +47,7 @@ inline constexpr std::size_t kSlotChannelSendData = 42 * 8; // CNetChan: build+s
 inline constexpr std::size_t kSlotChannelReady = 47 * 8;    // CNetChan: send-window check
 inline constexpr std::size_t kSlotClientGetChannel = 41 * 8;// CNetworkGameClient::GetChannel(slot)
 
-// CNetworkGameClient tick field (verified on build 11087116 AND dce58989: GetTick vtable
-// slot 5 body reads [this+0x3A8] - moved from +0x388 in the 5GB update).
+// GetTick (vtable slot 5) reads [this+0x3A8]; was +0x388 before the 5GB update.
 inline constexpr std::uintptr_t kClientTickFieldOffset = 0x3A8;
 
 using FindRecordFn = void* (*)(void* manager, int messageId);
@@ -133,9 +112,8 @@ inline void destroyMessage(void* message) noexcept
         destroyFn(message);
 }
 
-// Resolves manager -> record(typeId) -> info -> binding. Returns null on any failure (the
-// caller latches fail closed). No caching: the lagger already walks the registry per send and
-// it is a hash lookup, not a scan.
+// manager -> record(typeId) -> info -> binding; null on any failure. no caching needed
+// (hash lookup, not a scan).
 [[nodiscard]] inline void* resolveMessageBinding(int recordId) noexcept
 {
     const NetworkMessagesPointer messagesPointer{};
@@ -156,17 +134,11 @@ inline void destroyMessage(void* message) noexcept
     return *reinterpret_cast<void**>(reinterpret_cast<std::uintptr_t>(info) + 8);
 }
 
-// Diagnostic: the stage string of the LAST makeMessage failure (null = the last call
-// succeeded). Game-thread only (all consumers are); the features log it in their idle
-// breadcrumbs so a mid-session resolution/parse drift names its stage instead of failing
-// silently.
+// stage string of the last makeMessage failure (null = success). game-thread only.
 inline const char* lastMakeMessageFailure = nullptr;
 
-// Creates a message object for `recordId` and parses `payload` into it. The framed form fed to
-// ReadFromBuffer is varint(payloadSize) + payload + 4 zero slack bytes (the friend-source
-// framing, live-verified). Returns null on any failure (binding/create/parse/overflow/serialize
-// gate; lastMakeMessageFailure then names the stage) - a non-null return MUST be released with
-// destroyMessage().
+// create a message for `recordId`, parse `payload` into it. framed form fed to ReadFromBuffer:
+// varint(payloadSize) + payload + 4 zero slack bytes. non-null return must be destroyMessage()'d.
 [[nodiscard]] inline void* makeMessage(int recordId, const void* payload, std::size_t payloadSize,
                                        const char* debugName, std::uint8_t* framedScratch, std::size_t scratchSize) noexcept
 {
@@ -252,9 +224,8 @@ inline const char* lastMakeMessageFailure = nullptr;
     return readyFn && readyFn(channel);
 }
 
-// Clones a parsed message (Itanium copy ctor, slot 5 - slot 4 is a getter on Linux; the friend's
-// Windows slot 4 must never be ported). Returns null on failure; the clone is the caller's to
-// destroy with destroyMessage().
+// clone via Itanium copy ctor (slot 5; slot 4 is a getter on linux). the clone is the
+// caller's to destroy with destroyMessage().
 [[nodiscard]] inline void* cloneMessage(void* message) noexcept
 {
     if (!message)
@@ -279,9 +250,8 @@ inline void commitChannel(void* channel) noexcept
         commitFn(channel);
 }
 
-// Builds + transmits a datagram from committed data. Returns the transmitted byte count
-// (0 = refused: channel overflow flag / flow limit) - refused data STAYS queued, so callers
-// must back off. The byte count is the friend-lagger's "did the bytes actually leave" probe.
+// builds + transmits a datagram from committed data; returns byte count (0 = refused,
+// refused data stays queued so callers must back off).
 inline std::int32_t transmitChannelEx(void* channel, const char* debugName) noexcept
 {
     const auto sendDataFn = reinterpret_cast<SendDataFn>(vtableSlot(channel, kSlotChannelSendData));
@@ -302,8 +272,6 @@ inline bool transmitChannel(void* channel, const char* debugName) noexcept
 // --- CNETMsg_SetConVar payload builder -----------------------------------------------------
 // CNETMsg_SetConVar { optional CMsg_CVars convars = 1; }
 // CMsg_CVars { repeated CVar cvars = 1; }  CVar { optional string name = 1; optional string value = 2; }
-// (schema verified against the embedded protobuf descriptors in libengine2: CNETMsg_SetConVar
-// blob @0x2b20a2, CMsg_CVars blob @0x2b1e85 - 2026-09-13).
 inline constexpr int kSetConVarMessageId = 6; // NET group id (N13CNetMessagePBILi6E17CNETMsg_SetConVar in the RTTI catalog)
 
 struct SetConVarEntry {
@@ -361,13 +329,9 @@ struct SetConVarEntry {
     return written;
 }
 
-// Sends ONE SetConVar message carrying a single cvar entry through the client's net channel:
-// queue (slot 40) -> commit (43) -> transmit (42), so the update leaves as its own datagram the
-// moment it is queued. This is the direct rename/update path for latency-sensitive churn (the
-// name animator's per-frame renames) - it bypasses the engine's own userinfo-change machinery,
-// which coalesces console-driven churn. On failure *failReason (if requested) names the stage;
-// callers log throttled and fall back to the console path so a direct failure can never take
-// the feature down with it. Value is trusted to fit 512 bytes (animator frames are <= 160).
+// sends one SetConVar entry: queue -> commit -> transmit, so the update leaves as its own
+// datagram. bypasses the engine's userinfo-change machinery (which coalesces churn).
+// value must fit 512 bytes; on failure *failReason names the stage.
 [[nodiscard]] inline bool sendSingleSetConVar(void* networkClient, const char* cvarName, const char* value, const char* debugName, const char** failReason = nullptr) noexcept
 {
     void* const channel = getClientChannel(networkClient);

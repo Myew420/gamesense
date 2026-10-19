@@ -54,12 +54,10 @@ private:
         return static_cast<std::byte*>(hookContext.patternSearchResults().template get<PlayerRankingDataPointer>());
     }
 
-    // 2026-10-13 (crash triage): DIRTY-CHECKED writes only. The ranking block is
-    // GC-shared memory the GC thread rewrites per snapshot; the old apply() wrote
-    // level + xp + flags unconditionally EVERY TICK (3 writes x 64 Hz straight into
-    // moving GC allocations - the race class that stomped a GC job object and crashed
-    // the game with a corrupted vtable call). Write only when a value drifts; the
-    // flags write only when the present bits actually need setting.
+    // ranking block is GC-shared memory rewritten per snapshot: dirty-checked
+    // writes only (unconditional 64 Hz writes race the GC into moving allocations
+    // and corrupt GC job objects). flags written only when the present bits need
+    // setting.
     void apply(std::byte* rankingData) const noexcept
     {
         const std::uint32_t level = GET_CONFIG_VAR(FakeLevelValue);

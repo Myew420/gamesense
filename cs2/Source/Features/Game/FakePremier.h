@@ -38,10 +38,8 @@ public:
     {
         const bool premier = GET_CONFIG_VAR(FakePremierEnabled);
         const bool wingman = GET_CONFIG_VAR(FakeWingmanEnabled);
-        // The controller/block carry ONE current-mode slot (rankType + ranking + wins) -
-        // premier wins it when both are on (the prominent scoreboard badge). The TREE
-        // below carries every mode's node independently, so both features spoof their
-        // own badges at once.
+        // controller/block carry one current-mode slot (premier wins when both are on);
+        // the tree below carries every mode's node independently
         const bool controllerWingman = wingman && !premier;
 
         applyRankingBlock(premier, controllerWingman);
@@ -108,8 +106,7 @@ private:
             const std::int32_t score = wingmanMode
                 ? static_cast<std::int32_t>(GET_CONFIG_VAR(WingmanRank))
                 : static_cast<std::int32_t>(GET_CONFIG_VAR(FakePremierScore));
-            // Premier mode: also satisfy the >= 10 competitive-wins gate or the UI keeps
-            // the skill group hidden regardless of the score.
+            // premier: satisfy the >= 10 competitive-wins gate or the UI hides the skill group
             const std::int32_t wins = premier && GET_CONFIG_VAR(FakePremierWins)
                 ? static_cast<std::int32_t>(GET_CONFIG_VAR(PremierWins))
                 : currentWins;
@@ -152,9 +149,8 @@ private:
         }
     }
 
-    // The GC rank cache tree (see cs2::GcRankCacheTree): what the display actually reads.
-    // Faithful port of the reference Lua's find/insert/write - the tree only carries keys
-    // the GC sent, so a missing premier/wingman node needs the detached-slot re-link.
+    // GC rank cache tree (cs2::GcRankCacheTree): what the display reads.
+    // carries only keys the GC sent.
     void applyRankTree(bool premier, bool wingmanMode) const noexcept
     {
         using Tree = cs2::GcRankCacheTree;
@@ -180,29 +176,14 @@ private:
         const bool spoofWins = GET_CONFIG_VAR(FakePremierWins);
         const std::int32_t winsValue = static_cast<std::int32_t>(GET_CONFIG_VAR(PremierWins));
 
-        // The tree carries EVERY mode's node side by side (that is its whole point -
-        // the profile card reads each badge by its own key). The two toggles are
-        // INDEPENDENT: premier on -> key 11 <- Premier Score, wingman on -> key 7 <-
-        // Wingman Rank. The old either/or made wingman suppress the premier node
-        // entirely ("premier stays 20k" - frozen at the slider's old default).
-        //
-        // NO INSERT: a missing key is SKIPPED (findTreeNode only walks slots
-        // reachable from the root index - live-verified 2026-10-10 the hard way: the
-        // tree allocation holds only ~4 slots; what reads as "detached slots 4..7"
-        // beyond it is an ADJACENT GC-heap object (a 40-byte-stride tree the game
-        // walks in main-menu rich presence). Writing a "detached slot 7" (my probe
-        // did, and insertTreeNode would) lands in that object and corrupts its
-        // child indexes -> SIGSEGV in libclient+0x1ec4eca. Only root-reachable
-        // slots are ever written.
-        // 2026-10-13 (crash triage): DIRTY-CHECKED writes only. The tree is GC-shared
-        // heap the GC thread rewrites per snapshot, and nodes MOVE between snapshots
-        // (live-verified 2026-10-10). Unconditional 64 Hz writes raced a snapshot and
-        // landed in a freed/reused GC allocation -> a CProtoBufMsg/GC job object got
-        // its internals stomped -> the game called a garbage vtable slot -> SEGV_ACCERR
-        // executing a non-exec data page (in-game crash in the MatchmakingClientAbandon
-        // GC job machinery, twice, identical RVA). Writing ONLY on value drift shrinks
-        // the race window by orders of magnitude; the spoof still re-applies whenever
-        // the GC reverts it (that stays load-bearing).
+        // toggles are independent: premier -> key 11, wingman -> key 7.
+        // NO INSERT: findTreeNode only walks root-reachable slots; the allocation
+        // holds only ~4 slots, "detached slots 4..7" are an adjacent GC-heap object
+        // (40-byte stride) - writing them corrupts its child indexes ->
+        // SIGSEGV libclient+0x1ec4eca.
+        // GC-shared heap, nodes move between snapshots: dirty-checked writes only
+        // (unconditional 64 Hz writes race the GC into freed/reused allocations);
+        // the spoof still re-applies when the GC reverts it.
         const auto writeIfChanged = [](std::byte* node, int offset, std::int32_t value) noexcept {
             std::int32_t current{};
             std::memcpy(&current, node + offset, sizeof(current));
@@ -228,19 +209,15 @@ private:
             }
         }
 
-        // Premier display gate: the >= 10 competitive-wins check reads the competitive
-        // node's (key 12) wins field - satisfy it WITHOUT touching the classic comp
-        // rating (we have no comp-rank slider; writing the premier score there would
-        // show a nonsense classic badge).
+        // the >= 10 wins gate reads the competitive node's (key 12) wins field;
+        // satisfy it without touching the classic comp rating
         if (spoofWins) {
             if (auto* compNode = findTreeNode(nodes, rootIdx, Tree::kRankTypeCompetitive))
                 writeIfChanged(compNode, Tree::kNodeWinsOffset, winsValue);
         }
     }
 
-    // Returns the NODE BASE (add GcRankCacheTree offsets at the use site - the first
-    // version returned node+84 and the caller added +84 AGAIN, landing writes past the
-    // 136-byte node into the next slot's fields; live-verified 2026-10-10).
+    // returns the NODE BASE; add GcRankCacheTree offsets at the use site (136-byte nodes)
     [[nodiscard]] static std::byte* findTreeNode(std::byte* nodes, std::int32_t idx, std::int32_t wanted) noexcept
     {
         using Tree = cs2::GcRankCacheTree;
@@ -292,8 +269,7 @@ private:
         std::memcpy(bytes + rankingOffset, &score, sizeof(score));
         const std::int8_t premierRankType = kPremierRankType;
         std::memcpy(bytes + rankTypeOffset, &premierRankType, sizeof(premierRankType));
-        // The competitive-wins gate on the controller side (schema m_iCompetitiveWins):
-        // keep the real value unless the wins spoof is on.
+        // controller-side wins gate (m_iCompetitiveWins): keep the real value unless spoofing
         std::int32_t wins{};
         std::memcpy(&wins, bytes + winsOffset, sizeof(wins));
         const std::int32_t spoofedWins = GET_CONFIG_VAR(FakePremierWins)
@@ -338,8 +314,7 @@ private:
     // The game's own rankType jump table (0x1EE5540 on 11106093): 7=Wingman, 8=ScrimComp2v2,
     // 9=ScrimComp5v5, 10=DangerZone, 11=Premier, 12=Competitive.
     static constexpr std::int8_t kWingmanRankType = 7;
-    // The premier skill group is gated behind >= 10 competitive wins - below that the UI
-    // hides the rank no matter what the score says.
+    // premier skill group is gated behind >= 10 competitive wins
     static constexpr std::int32_t kMinPremierWins = 10;
 
     inline static cs2::C_BaseEntity* cachedController{nullptr};

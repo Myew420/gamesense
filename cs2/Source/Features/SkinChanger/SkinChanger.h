@@ -192,9 +192,8 @@ private:
         
         
         
-        // The game's REAL subclass hash for the knife's legacy model (falls back to the old
-        // synthetic token only for table misses) - the real hash is what makes updateSubclass()
-        // dispatch the knife's actual VData (grip/pose). See kKnifeModels' comment.
+        // real subclass hash for the knife's model (synthetic token only as table-miss
+        // fallback); updateSubclass() dispatches the knife's VData (grip/pose) off it.
         const auto desiredSubclassToken = makeSubclassToken(static_cast<std::uint16_t>(*configuredKnife));
 
         const bool alreadyInDesiredState =
@@ -240,9 +239,7 @@ private:
             return;
         lastReapplyAttemptTime = curtime.value();
 
-        // The item definition's model path - the same field the current working reference
-        // (2026-10-09) reads through the schema (m_pszModelName). Our resolveKnifeModelPath
-        // reads the same itemdef field directly.
+        // item definition's model path (m_pszModelName), read directly by resolveKnifeModelPath.
         const char* modelPath = resolveKnifeModelPath(static_cast<std::uint16_t>(*configuredKnife));
 
         
@@ -334,9 +331,7 @@ private:
         
         
         
-        // Same 1/2 legacy/default mesh split as guns - the current working reference uses
-        // exactly this for knives (the ~0-all-groups variant was a different, older reference;
-        // the depot no longer even ships _ag2 knife models).
+        // same 1/2 legacy/default mesh split as guns.
         const std::uint64_t meshMask = knife.isEquippedPaintKitLegacy() ? 2 : 1;
         knife.setMeshGroupMask(meshMask);
 
@@ -365,12 +360,9 @@ private:
         
         
         
-        // The current working reference's rebuild trio, in its exact order (flush with
-        // dispatch -> set-merge -> UpdateSkin(1) -> PostDataUpdate). UpdateSkin resets the
-        // weapon's CACHED paint attribution (the cache the mesh path reads - the HUD-only
-        // bug). The vData guard from the old regenerateSkin() still applies: a freshly
-        // spawned weapon without resolved VData must not be rebuilt yet (the caller retries
-        // next frame via markApplied not running).
+        // rebuild order: flush with dispatch -> set-merge -> UpdateSkin(1) -> PostDataUpdate.
+        // UpdateSkin resets the cached paint attribution (what the mesh path reads).
+        // no rebuild before VData resolves; markApplied not running makes next frame retry.
         if (!knife.baseEntity().vData().valueOr(nullptr))
             return;
         knife.updateCompositeMaterial(true);

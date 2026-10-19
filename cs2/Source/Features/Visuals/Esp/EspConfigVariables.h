@@ -50,8 +50,7 @@ CONFIG_VARIABLE(FlagKit, bool, true);
 CONFIG_VARIABLE(TeammatesEnabled, bool, false);
 CONFIG_VARIABLE_RANGE(MaxDistance, esp_params::kMaxDistance);
 
-// Customization batch (2026-10-12): sizes/colors as requested - all appended
-// LAST (order-sensitive config loader).
+// Appended LAST: the config loader is order-sensitive.
 inline constexpr auto kHeadCircleRadius = RangeConstrainedVariableParams<std::uint8_t>{.min = 2, .max = 20, .def = 5};
 inline constexpr auto kBoxThickness = RangeConstrainedVariableParams<std::uint8_t>{.min = 1, .max = 6, .def = 1};
 inline constexpr auto kCornerLength = RangeConstrainedVariableParams<std::uint8_t>{.min = 5, .max = 90, .def = 25};

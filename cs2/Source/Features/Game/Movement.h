@@ -79,13 +79,9 @@ public:
                 if (const auto maxSpeed = localPawn.getActiveWeapon().maxSpeed(); maxSpeed.hasValue() && maxSpeed.value() > 0.0f)
                     weaponMaxSpeed = maxSpeed.value();
 
-                // The game drops a move scalar below ~0.5 per axis (single key dead
-                // under 50%, diagonals dead under ~71%), so the speed cannot be
-                // scaled. Bang-bang instead: the player's own full input passes
-                // untouched while one more tick of acceleration still fits under
-                // the target, otherwise the tick coasts on friction.
-                // Known ceiling: speed saws up to ~28 u/s under the target; subtick
-                // analog steps if it must hold the target tighter.
+                // move scalars below ~0.5/axis are dropped (single key dead under
+                // 50%, diagonals under ~71%): speed cannot be scaled, bang-bang
+                // pass/coast instead. ceiling: saws up to ~28 u/s under target.
                 const float speed2d = trig::squareRoot(velocity.value().x * velocity.value().x + velocity.value().y * velocity.value().y);
                 const float target = static_cast<float>(GET_CONFIG_VAR(movement_vars::SlowWalkSpeed)) / 100.0f * weaponMaxSpeed;
                 const float gain = accelerate.value() * std::max(250.0f, weaponMaxSpeed) * tickInterval.value();
@@ -99,13 +95,9 @@ public:
             if (moveType.hasValue() && moveType.value() == kMoveTypeLadder) {
                 const auto forward = userCmd.forwardMove();
                 const auto left = userCmd.leftMove();
-                // Engine view angles (the CAMERA, read straight off CCSGOInput at
-                // kViewAnglesOffset), NOT the cmd's angles: the cmd viewangles are
-                // user-controllable state, and reading them here after we overwrite
-                // them fed our own writes back into the goingUp/yaw math every tick -
-                // a self-feedback loop that spun the camera +/-90 deg/tick and pinned
-                // pitch 89 (the "view spins/glitches on ladder" report), while the
-                // resulting scrambled move direction never ladder-accelerated at all.
+                // engine camera angles off CCSGOInput at kViewAnglesOffset, NOT the
+                // cmd angles: we write the cmd viewangles, so reading them feeds our
+                // own writes back into the goingUp/yaw math (self-feedback spin)
                 const auto engineAngles = engineViewAngles();
                 if (forward.hasValue() && left.hasValue() && (forward.value() != 0.0f || left.value() != 0.0f)
                     && engineAngles.hasValue()) {
@@ -114,9 +106,8 @@ public:
                         ? forward.value() > 0.0f
                         : engineAngles.value().x < 0.0f;
 
-                    // Velocity's shape: pitch 89 + yaw offset 90 deg from the camera,
-                    // forced back + side move - the ladder climbs on the SIDE scalars
-                    // (pitch-89 trick), this is not our invention.
+                    // pitch 89 + yaw 90 deg off camera + forced back/side move:
+                    // the ladder climbs on the side scalars (pitch-89 trick)
                     float modifiedYaw = engineAngles.value().y + (goingUp ? -90.0f : 90.0f);
                     while (modifiedYaw > 180.0f)
                         modifiedYaw -= 360.0f;
@@ -243,11 +234,8 @@ public:
                                     }
 
                                     if (pushBack) {
-                                        // 2026-10-13 friend report "edgestop broken": the old
-                                        // 0.3 magnitude sat INSIDE the game's ~0.5/axis move-scalar
-                                        // dead zone (the SlowWalk saga) - the counter-move produced
-                                        // no wish direction at all, so the player coasted over the
-                                        // edge. 0.55 clears the dead zone (still a gentle push).
+                                        // 0.55 clears the ~0.5/axis move-scalar dead zone
+                                        // that swallowed the old 0.3 counter-move
                                         pendingForward = std::clamp(trig::cosine(pushbackRotation) * 0.55f, -1.0f, 1.0f);
                                         pendingLeft = std::clamp(trig::sine(pushbackRotation) * -0.55f, -1.0f, 1.0f);
                                         pendingBackButton = pendingForward < 0.0f;
@@ -261,11 +249,8 @@ public:
                                     }
                                 }
 
-                                // Stationary at the edge (friend report "can't walk
-                                // afterwards"): the old path emitted a unit-magnitude
-                                // move derived from atan2(0,0)=0 and cleared the real
-                                // buttons - a phantom forced walk. Nearly stopped means
-                                // nothing left to brake: emit nothing, keys stay real.
+                                // nearly stopped: nothing left to brake, emit nothing
+                                // (atan2(0,0)=0 would force a phantom walk)
                                 if (speed2d <= 5.0f)
                                     return;
 
@@ -317,9 +302,8 @@ public:
 
         const UserCmd userCmd{cmd};
 
-        // Every forced move (Slow Walk coast, Edge Stop, Fast Ladder) rides the
-        // command scalars only. Writing CSGOInput's persistent movement state stomped the
-        // game's real queued W/A/S/D samples, stranding keys as held (issue #4).
+        // forced moves ride the command scalars only; writing CSGOInput's persistent
+        // movement state stomps the real queued WASD samples (stuck keys)
         if (pendingForceMove) {
             userCmd.setForwardMove(pendingForward);
             userCmd.setLeftMove(pendingLeft);
@@ -613,10 +597,8 @@ private:
 
     // The ENGINE's view angles (the camera), captured from the CCSGOInput object
 public:
-    // Engine view angles (the CAMERA), captured from the CCSGOInput object
-    // on every CreateMove. Unlike the cmd's viewangles these are never written by
-    // us, so nothing can feed our own output back into feature math. Public:
-    // the saved-throw recorder reads the camera too.
+    // engine camera angles off CCSGOInput, never written by us (no self-feedback).
+    // public: the saved-throw recorder reads the camera too.
     [[nodiscard]] Optional<cs2::Vector> engineViewAngles() const noexcept
     {
         if (!inputObject)

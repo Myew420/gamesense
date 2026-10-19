@@ -283,7 +283,14 @@ namespace string_xref
     if (!instructionStart || leaSites != 1)
         return {};
 
-    
+
+    // Locate the containing function start. The classic walkback for a
+    // "push rbp; mov rbp,rsp" prologue first (fast path) - but modern builds
+    // omit frame pointers and large functions exceed any small window, so the
+    // authoritative fallback is the int3 PADDING boundary: every function in
+    // these binaries is separated by a run of 0xCC bytes (verified across all
+    // archived client builds), while a lone 0xCC can appear inside an
+    // instruction stream - require a run of at least 4.
     constexpr std::size_t kMaxWalkback = 0x800;
     const auto offsetInText = text.offsetOf(*instructionStart);
     if (offsetInText < kMaxWalkback)
@@ -291,15 +298,32 @@ namespace string_xref
     const auto walkRegion = textBytes.data() + offsetInText - kMaxWalkback;
     std::optional<std::size_t> prologueOffset;
     for (std::size_t back = 0; back + 4 <= kMaxWalkback; ++back) {
-        const auto idx = kMaxWalkback - 4 - back; 
+        const auto idx = kMaxWalkback - 4 - back;
         if (std::memcmp(walkRegion + idx, "\x55\x48\x89\xE5", 4) == 0) {
-            prologueOffset = idx;
+            prologueOffset = offsetInText - kMaxWalkback + idx;
             break;
         }
     }
-    if (!prologueOffset)
-        return {};
-    return reinterpret_cast<std::uintptr_t>(textBytes.data()) + offsetInText - kMaxWalkback + *prologueOffset;
+    if (!prologueOffset) {
+        // 0x10000 covers the largest observed callers (the legs prepass
+        // reference sits ~32KB deep inside a heavily inlined function).
+        constexpr std::size_t kInt3Walkback = 0x10000;
+        constexpr std::size_t kInt3Run = 4;
+        const auto start = offsetInText > kInt3Walkback ? offsetInText - kInt3Walkback : 0;
+        for (std::size_t i = offsetInText; i >= start + kInt3Run;) {
+            bool run = true;
+            for (std::size_t j = 1; j < kInt3Run; ++j)
+                run = run && std::to_integer<unsigned char>(textBytes[i - j]) == 0xCC;
+            if (run && std::to_integer<unsigned char>(textBytes[i]) != 0xCC) {
+                prologueOffset = i;
+                break;
+            }
+            --i;
+        }
+        if (!prologueOffset)
+            return {};
+    }
+    return reinterpret_cast<std::uintptr_t>(textBytes.data()) + *prologueOffset;
 }
 
 }

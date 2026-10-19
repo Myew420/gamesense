@@ -9,9 +9,8 @@
 #include <GameClient/UserCmd.h>
 #include <HookContext/HookContextMacros.h>
 
-// The legacy TestStrafer setting now enables the normal solver with diagnostics.
-// A second movement writer used to add synthetic camera yaw subticks and compete
-// with the real mouse input. Only Bunnyhop owns the strafe command now.
+// legacy toggle: enables the normal solver with diagnostics.
+// only Bunnyhop writes the strafe command now.
 template <typename HookContext>
 class TestStrafer {
 public:
@@ -19,7 +18,7 @@ public:
 
     void onCreateMove(cs2::CUserCmd* cmd) const noexcept
     {
-        // Rides the bhop feature (2026-10-13): Bunnyhop off = diagnostics off too.
+        // rides the bhop gate: Bunnyhop off = diagnostics off
         if (!GET_CONFIG_VAR(TestStraferEnabled) || !GET_CONFIG_VAR(BunnyhopEnabled) || !UserCmd{cmd})
             return onUnload();
         auto&& pawn = hookContext.localPlayerController().pawn().template as<PlayerPawn>();

@@ -42,6 +42,11 @@ struct WorldColorsState {
     bool bloomQueuedValid = false;
     float lastQueued = 0.0f;
     double lastQueueTime = 0.0;
+    // r_csgo_render_post_bloom (the pass master switch): original + forced flag.
+    bool bloomEnableOriginalValid = false;
+    bool bloomEnableIsFloat = false;
+    bool bloomEnableForced = false;
+    int bloomEnableOriginal = 0;
 
     // Engine fog_* cvar originals (cached on first fog enable, restored on disable).
     bool fogCvarsCached = false;

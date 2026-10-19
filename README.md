@@ -6,22 +6,20 @@ An in-process internal trainer for Counter-Strike 2 on Linux. Originally started
 fork of [Osiris](https://github.com/danielkrupinski/Osiris), the codebase has since been heavily
 refactored: the legacy Source 2 Panorama UI was replaced with Dear ImGui rendered directly into
 the game's Vulkan swapchain, LuaJIT 2.1 is embedded for user scripting, and all offsets are
-resolved at load time through pattern-based signature scanning — no hardcoded addresses.
+resolved at load time through pattern-based signature scanning, nothing hardcoded.
 
 Built for personal use and local testing. Expect breakage after every CS2 update; fixes and
 pattern re-anchors are the main maintenance work and pull requests are very welcome.
 
-## Project status (October 2026)
+## Status (October 2026)
 
-- **CS2 module** — builds clean and is in active use. All patterns are currently re-validated
-  against the live build (161 signatures, exactly-once checked). Two features remain
-  build-gated: viewmodel rotation is keyed to one inspected client build (GNU build ID
-  `ea57d883…`) and stays inert on newer builds, and engine-exact wall penetration
+- **CS2 module** - builds clean and is in active use. All patterns are currently re-validated
+  against the live build (161 signatures, exactly-once checked). Engine-exact wall penetration
   ("Shoot Walls") needs a per-build ABI table (present for `ea57d883…` and `866bdc00…`);
   everywhere else the ragebot falls back to a trace estimate.
-- **TF2 module** — experimental stub: constructor diagnostics, minimal Vulkan present hooks and
+- **TF2 module** - experimental stub: constructor diagnostics, minimal Vulkan present hooks and
   logging only (10 files). No aimbot, visuals, menu or config system yet.
-- **Windows** — unsupported and none planned. The old Windows tree is unmaintained legacy code.
+- **Windows** - unsupported and none planned. The old Windows tree is unmaintained legacy code.
 
 ## Architecture
 
@@ -30,13 +28,13 @@ pattern re-anchors are the main maintenance work and pull requests are very welc
 | `cs2/` → `libMangoHud.so` | 64-bit module injected into the CS2 process. Hooks `vkQueuePresentKHR`/`vkAcquireNextImageKHR` to render the ImGui overlay through the game's own Vulkan, hooks the input/net paths for movement and combat features, and embeds a LuaJIT 2.1 runtime for user scripts. |
 | `cs2/` → `libSteamModule.so` | 64-bit module injected into the Steam client process (64-bit since the 2026-10-17 steamrt64 update). Patches `steamservice.so`'s GOT so its `fopen`/`fopen64`/`open`/`open64`/`fgets`/`read` calls filter our module's lines out of `/proc/*/maps` reads, concealing the injected memory descriptors from Steam-side sweeps. |
 | [neversneeze-loader](https://github.com/Broshan1337/neversneeze-loader) | External ELF loader. Packs the payloads, signs them, injects via anonymous memfds and stamps the cryptographic session trailer the modules verify. |
-| `cs2/inject.sh` | Scripted fallback (`inject_memfd` + GDB). Does **not** stamp a session trailer — see below. |
+| `cs2/inject.sh` | Scripted fallback (`inject_memfd` + GDB). Does **not** stamp a session trailer - see below. |
 
 ## Prerequisites
 
 - x86_64 Linux, GCC 13+ or Clang 18+ (C++20), CMake 3.24+, Python 3.10+ for the tooling.
 - **Only the Steam module needs 32-bit multilib** support (Steam is a 32-bit process).
-- The loader links OpenSSL. The CS2/TF2 modules link nothing but `libdl` — SDL, Vulkan and
+- The loader links OpenSSL. The CS2/TF2 modules link nothing but `libdl` - SDL, Vulkan and
   ImGui are all resolved from the game process or vendored in-tree, so no `-dev` packages for
   those are needed.
 
@@ -67,7 +65,7 @@ sudo pacman -S multilib-devel
 
 ## Key material (one-time, per machine)
 
-Modules verify a session trailer against a machine-local key — a fresh clone does **not**
+Modules verify a session trailer against a machine-local key - a fresh clone does **not**
 build without it. Mint your own keydir and generate the module-side header (the loader must
 be built from the same keydir):
 
@@ -99,7 +97,7 @@ cmake --build cs2/build --target Neversnooze
 # -> cs2/build/Source/libMangoHud.so
 ```
 
-CS2 module, debug — build this first when re-deriving patterns or diagnosing crashes; a debug
+CS2 module, debug - build this first when re-deriving patterns or diagnosing crashes; a debug
 build makes pattern-uniqueness assertion failures fatal and gives full logs:
 
 ```sh
@@ -107,7 +105,7 @@ cmake -B cs2/build-dbg -S cs2 -DCMAKE_BUILD_TYPE=Debug -DNEVERSNOOZE_OBFUSCATE=O
 cmake --build cs2/build-dbg --target Neversnooze
 ```
 
-Steam module (64-bit, native target since the 2026-10-17 steamrt64 client update) — the
+Steam module (64-bit, native target since the 2026-10-17 steamrt64 client update) - the
 Loader/inject.sh read it from its own tree:
 
 ```sh
@@ -125,7 +123,7 @@ cmake --build tf2/build --target NeversnoozeTF2
 ## Testing
 
 Unit tests and the VAC decoy harness run on GoogleTest, fetched automatically at configure
-time (needs network the first time). The functional suite is stale upstream — enable `unit`
+time (needs network the first time). The functional suite is stale upstream - enable `unit`
 only:
 
 ```sh
@@ -141,7 +139,7 @@ self-elevates, injects the Steam module and the CS2 module through memfds, and s
 session trailer. A local build always wins over the embedded payloads on dev machines.
 
 **Fallback: `sudo cs2/inject.sh`** drives `cs2/inject_memfd` (built on demand) and GDB. It
-performs a raw injection **without** a session trailer — by design the modules fail closed
+performs a raw injection **without** a session trailer - by design the modules fail closed
 then: the CS2 module detects the missing/invalid trailer and releases itself, and the Steam
 module goes inert. Use the loader for normal operation; `inject.sh` is for debugging the
 injection path itself.
@@ -150,13 +148,13 @@ injection path itself.
 
 Everything lives under `~/OsirisCS2/`:
 
-- `~/OsirisCS2/configs/` — saved configurations (JSON) and feature sidecars
-- `~/OsirisCS2/logs/` — rotating logs
-- `/tmp/gamesense_gui.log` — in-game anomaly log; a healthy session writes nothing
+- `~/OsirisCS2/configs/` - saved configurations (JSON) and feature sidecars
+- `~/OsirisCS2/logs/` - rotating logs
+- `/tmp/gamesense_gui.log` - in-game anomaly log; a healthy session writes nothing
 
 ## Helping update it after a CS2 update
 
-Every update breaks some patterns/offsets — that's most of the maintenance work, and
+Every update breaks some patterns/offsets - that's most of the maintenance work, and
 contributions here are very welcome:
 
 1. Dump the new build with [cs2-dumper (Linux fork)](https://github.com/Broshan1337/cs2dumper-for-linux)
@@ -173,18 +171,18 @@ contributions here are very welcome:
 
 ## Known limitations
 
-- Don't publish Nix derivations built with `nix/key-material.nix` — private key material is
+- Don't publish Nix derivations built with `nix/key-material.nix` - private key material is
   copied into the world-readable Nix store.
 - The Lua runtime preloads the LuaJIT FFI. Scripts have unrestricted access to native
   functions; do not run untrusted community scripts.
-- Viewmodel rotation and engine-exact wall penetration are keyed to inspected client builds
-  (see status above); they stay disabled on unrecognized builds instead of misbehaving.
+- Engine-exact wall penetration is keyed to inspected client builds (see status above); it
+  stays disabled on unrecognized builds instead of misbehaving.
 
 ## Credits
 
-- [Osiris](https://github.com/danielkrupinski/Osiris) by Daniel Krupiński — the starting point
+- [Osiris](https://github.com/danielkrupinski/Osiris) by Daniel Krupiński - the starting point
   (MIT, license file kept): config system and core feature architecture.
-- [FrameworkCS2](https://github.com/Sumandora/FrameworkCS2) by Sumandora — reference for many
+- [FrameworkCS2](https://github.com/Sumandora/FrameworkCS2) by Sumandora - reference for many
   features and the entity/render approach.
-- [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut — the UI layer.
-- [LuaJIT](https://luajit.org/) by Mike Pall — the scripting runtime.
+- [Dear ImGui](https://github.com/ocornut/imgui) by Omar Cornut - the UI layer.
+- [LuaJIT](https://luajit.org/) by Mike Pall - the scripting runtime.

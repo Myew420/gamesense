@@ -22,37 +22,24 @@
 #include <UI/ImGui/OverlayLayer.h>
 #include <Utils/Optional.h>
 
-// Grenade ESP (batch D, rewritten 2026-10-13 after the in-game verdict):
-//
-// 1. TRAJECTORY PREDICTION while HOLDING a grenade - a live physics preview
-//    (the original request: "render a line where the grenade would go and
-//    land with like a circle"): thrown from the eye along the view with
-//    full-throw speed + our velocity, gravity + bounces stepped through our
-//    Tracing primitive (reflect about the surface normal, restitution 0.3).
+// Grenade ESP:
+// 1. TRAJECTORY PREDICTION while HOLDING a grenade: thrown from the eye
+//    along the view with full-throw speed + our velocity, gravity + bounces
+//    through Tracing (reflect about the surface normal, restitution 0.3).
 //    Points + landing publish WORLD-space; the draw side projects.
 // 2. FLASH TIMER on live flashbang projectiles (time to detonate).
-// 3. INFERNO BOUNDS only while the fire is actually burning (the old version
-//    drew the circle as long as the Inferno entity existed - the entity
+// 3. INFERNO BOUNDS only while the fire is actually burning (the entity
 //    outlives the flames): burning = curtime < fireEffectTickBegin*tick +
 //    fireLifetime.
-//
-// THREADING: the whole scene (flash timers, inferno bounds, trajectory) is
-// produced on the GAME thread (CreateMove) and published to the OverlayLayer -
-// the trajectory reads m_angEyeAngles/m_vecVelocity and runs traces, all of
-// which tear if read mid-tick on the render thread (the first cut ran the sim
-// on the render thread and drew glitchy random-angle lines - 2026-10-13
-// report). The render side only draws.
-//
-// All fail-closed: no session / no eye / no weapon data = no-op.
+// The whole scene is produced on the GAME thread (CreateMove) and published
+// to the OverlayLayer; the render side only draws. All fail-closed:
+// no session / no eye / no weapon data = no-op.
 namespace grenade_detail
 {
 
 inline constexpr int kMaxTrajectoryPoints = 64;
-inline constexpr float kGravity = 320.0f;      // sv_gravity * 0.4 - the community-verified
-                                               // CS grenade projectile gravity (800 = the
-                                               // player gravity; grenades fall at 0.4x - the
-                                               // old 800 made the preview plunge 2.5x too
-                                               // fast, the "long line going down" report)
+inline constexpr float kGravity = 320.0f;      // sv_gravity * 0.4: grenade projectile
+                                               // gravity (players fall at 800)
 inline constexpr float kRestitution = 0.45f;   // velocity kept per bounce
 inline constexpr float kTick = 0.015625f;     // 64-tick
 inline constexpr float kMaxSimTime = 3.0f;
@@ -117,10 +104,8 @@ inline int simulate(const cs2::Vector& eye, const cs2::Vector& forward,
     int bounces = 0;
     for (float t = 0.0f; t < kMaxSimTime; t += kTick) {
         cs2::Vector bouncePoint;
-        // NOTE: the low-speed stop gate only fires GROUNDED (after a bounce).
-        // The first version checked |v| every step and a free-falling grenade
-        // dips under 30 u/s early - the sim stopped mid-air and the preview
-        // "never landed" (caught by the straight-drop unit test).
+        // the low-speed stop gate only fires GROUNDED (after a bounce):
+        // a free-falling grenade dips under 30 u/s early.
         const bool bounced = step(position, velocity, skipEntity, bouncePoint, tracer);
         // Free flight: sample every 3rd step (~21/s, smoother arc); bounces
         // always recorded.
@@ -196,7 +181,7 @@ public:
                     return;
                 const float endTime = static_cast<float>(begin.value()) * tickInterval + lifetime.value();
                 if (curtime.value() >= endTime)
-                    return;  // fire already out - no circle (2026-10-13 report)
+                    return;  // fire already out - no circle
                 scene.infernos[scene.infernoCount++] = overlay_layer::GrenadeMarker{origin.value().x, origin.value().y, origin.value().z, 0.0f};
                 return;
             }

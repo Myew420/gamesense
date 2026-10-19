@@ -45,13 +45,11 @@ struct Hooks {
     VTableSlotPatch sceneObjectDrawArray;
     VTableSlotPatch aggregateSceneObjectDrawArray;
     VTableSlotPatch addLayersPostHud;
-    SingleBytePatch renderLegs;
 };
 
 inline Hooks hooks;
 
 inline std::uintptr_t flashOverlaySlot{0};
-inline std::uintptr_t renderLegsFunction{0};
 
 [[nodiscard]] inline bool install() noexcept
 {
@@ -138,13 +136,6 @@ inline std::uintptr_t renderLegsFunction{0};
     
     {
         const DynamicLibrary clientLibrary{cs2::CLIENT_DLL};
-        if (const auto function = string_xref::findFunctionStart(clientLibrary.getStringLiteralsSection(), clientLibrary.getCodeSection(), "FirstpersonLegsPrepass")) {
-            renderLegsFunction = *function;
-            StatusReport::record("First-person legs render function resolved", true);
-        } else {
-            StatusReport::record("Legs render function not resolved - legs removal inactive", false);
-            allResolved = false;
-        }
     }
 
     return allResolved;
@@ -162,27 +153,15 @@ inline void setFlashOverlayRemoved(bool removed) noexcept
         hooks.addLayersPostHud.restore();
 }
 
-inline void setLegsRenderRemoved(bool removed) noexcept
-{
-    if (removed && !renderLegsFunction)
-        return;
-    if (removed && !hooks.renderLegs.isActive())
-        (void)hooks.renderLegs.install(renderLegsFunction);
-    else if (!removed && hooks.renderLegs.isActive())
-        hooks.renderLegs.restore();
-}
-
 inline void uninstall() noexcept
 {
     setFlashOverlayRemoved(false);
-    setLegsRenderRemoved(false);
     hooks.particlesDrawArray.restore();
     hooks.lightBinnerProcessLights.restore();
     hooks.skyBoxDrawArray.restore();
     hooks.sceneObjectDrawArray.restore();
     hooks.aggregateSceneObjectDrawArray.restore();
     hooks.addLayersPostHud.restore();
-    hooks.renderLegs.restore();
 }
 
 }

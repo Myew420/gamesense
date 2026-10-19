@@ -5,13 +5,9 @@
 #include <Utils/NsStr.h>
 #include <Utils/RetAddrSpoofer.h>
 
-// Console banner (gamesneeze res/console.png style): the NS logo printed
-// into the game console once at the first rendered frame, ahead of the
-// [status] lines. Font = figlet "big" (pure block letters - the first cut
-// used "slant" whose diagonal strokes read as garbage in the console's
-// monospace face; 2026-10-13 "scuffed" report). Every line rides NS_STR -
-// the brand must never appear in the binary as plaintext (strings check
-// stays clean; the vault kills both .rodata and movbas leaks).
+// NS logo printed to the game console once at the first rendered frame,
+// ahead of the [status] lines. figlet "big" font. every line rides NS_STR:
+// the brand must never appear in the binary as plaintext.
 namespace console_banner
 {
 

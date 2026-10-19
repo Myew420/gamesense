@@ -114,8 +114,7 @@ public:
             return;
         }
 
-        // Don't shoot while flashed (friend request 2026-10-13): the target is
-        // invisible to the player; stand the ragebot down until vision clears.
+        // don't shoot while flashed; stand down until vision clears.
         if (GET_CONFIG_VAR(aimbot_vars::IgnoreFlash) && localPawn.getRemainingFlashBangTime() > 0.15f) {
             VerifyConsole::write(4.0f, "rage", "gate flashed (%.1f s left)", localPawn.getRemainingFlashBangTime());
             lastTargetHandleValue = 0;
@@ -149,8 +148,7 @@ public:
         Optional<typename AimTarget<HookContext>::Target> refinedCandidate;
         const auto aim = aimTarget.acquire(eye.value(), currentPitch.value(), currentYaw.value(), maxFov,
             hitboxFlags(), [&](const auto& candidate) {
-                // Don't shoot into smoke (friend request 2026-10-13): reject
-                // candidates whose sight line crosses an active smoke volume.
+                // reject candidates whose sight line crosses a smoke volume.
                 if (GET_CONFIG_VAR(aimbot_vars::IgnoreSmoke) && linePassesThroughSmoke(eye.value(), candidate.aimPoint))
                     return false;
                 if (passesVisibility(localPawn, eye.value(), candidate)) return true;
@@ -399,28 +397,22 @@ public:
     }
 
 public:
-    // Staged-shot query for the split-phase duck peek (its press/release decision
-    // rides on whether this tick carries a shot).
+    // staged-shot query: the duck peek's press/release decision rides on it.
     [[nodiscard]] bool shotStaged() const noexcept
     {
         return shotStagedThisTick;
     }
 
-    // Duck peek (standing-inaccuracy exploit) armed: evaluate the cone the shot
-    // actually sees - the duck is released for the fire tick (velocity's
-    // get_standing_inaccuracy), not the live ducked cone.
+    // duck peek armed: evaluate the standing-accuracy cone; the duck is
+    // released for the fire tick, not the live ducked cone.
     [[nodiscard]] bool duckPeekEval(auto&& localPawn) const noexcept
     {
         return GET_CONFIG_VAR(aimbot_vars::DuckPeek) && localPawn.isOnGround() == true;
     }
 
-    // Geometric smoke test (friend request 2026-10-13): does the sight line
-    // from->to cross an active (popped) smoke volume? Smoke spheres are the
-    // standard approximation - CS2's own GetSmokeDensityInLine is the exact
-    // route but needs a fresh pattern (not forged yet).
-    // ponytail: sphere radius 144 approximates the volume; a glancing line
-    // through the volume's edge corner can pass a real smoke and miss the
-    // sphere (or vice versa) - upgrade path is forging the engine call.
+    // does from->to cross an active (popped) smoke volume? sphere radius 144
+    // approximates the volume - a glancing line at the edge can miss the
+    // sphere; the exact route is the engine call, which needs a fresh pattern.
     [[nodiscard]] bool linePassesThroughSmoke(const cs2::Vector& from, const cs2::Vector& to) const noexcept
     {
         constexpr float kSmokeRadius = 144.0f;
@@ -564,8 +556,8 @@ private:
         return target;
     }
 
-    // Debug multipoints (velocity debug_multipoints): publish the generated scan
-    // cloud for the render overlay, colored per hitbox (velocity's map).
+    // debug multipoints: publish the scan cloud for the render overlay,
+    // colored per hitbox.
     void publishMultipointDebug(const MultiPoint::Point* points, int pointCount, int hitboxIndex) const noexcept
     {
         if (!GET_CONFIG_VAR(aimbot_vars::DebugMultipoints)) {
@@ -878,10 +870,9 @@ private:
         int actualHitgroup = target.hitgroup;
         const bool wallCheck = GET_CONFIG_VAR(aimbot_vars::WallCheck);
         const bool autowall = GET_CONFIG_VAR(aimbot_vars::Autowall);
-        // Native bullet simulation supplies the actual struck hitgroup even
-        // for a clear shot: a ray to the head can strike an arm first. On a
-        // client build it does not know, the trace estimate answers instead
-        // and reports the aimed hitgroup (see Autowall::evaluateAimPoint).
+        // bullet simulation supplies the actual struck hitgroup even on a
+        // clear shot (a head ray can strike an arm first); without it the
+        // trace estimate reports the aimed hitgroup (evaluateAimPoint).
         if (autowall) {
             const auto impact = Autowall::evaluateAimPoint(eye, target.aimPoint, localPawn.baseEntity(), target.entity,
                 {base.value(), weapon.penetrationPower().valueOr(0.0f), range.value(), maxRange.value()}, {},
@@ -982,14 +973,10 @@ private:
         if (const auto weaponMax = pawn.getActiveWeapon().maxSpeed(); weaponMax.hasValue())
             inputs.weaponMaxSpeed = weaponMax.value();
         auto_stop::apply(userCmd, velocity, viewYaw, inputs);
-        // Issue #4 round 4 (2026-10-13): NO subtick stream surgery here.
-        // releaseButton() sets currentSize = 0 - it clears the WHOLE timeline
-        // including the real W/A/S/D samples - and stripAnalog() strips the
-        // live analog scalars. Either one strands keys held across a jump
-        // (the reporter's repro: Auto Stop ON -> jump -> tap W -> W stuck,
-        // same class as the Slow Walk saga). auto_stop::apply writes command
-        // scalars + button banks only, which is the entire counter-wish stop;
-        // the stream belongs to the player's real input.
+        // no subtick stream surgery here: releaseButton() sets currentSize=0
+        // (clears the whole timeline incl. real W/A/S/D samples) and
+        // stripAnalog() strips live analog scalars; either strands held keys.
+        // auto_stop::apply writes command scalars + button banks only.
     }
 
     static constexpr int kHitchanceSamples = 256;

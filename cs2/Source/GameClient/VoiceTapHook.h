@@ -156,7 +156,10 @@ inline bool hookedReadFromBuffer(void* manager, net_messages::BitRead* reader, v
     
     
     
-    StatusReport::record("VoiceTap: manager vtable reshuffled (09-25), parse slot unverified - tap disabled", false);
+    // Permanently disabled pending the manager parse-slot re-derivation
+    // (documented in [[reference_voice_revealer_cs2]] / the 09-25 memory). A
+    // known-by-design state is not an anomaly - stay silent (the log contract)
+    // and fail closed.
     return false;
 
     NetworkMessagesPointer managerPointer;

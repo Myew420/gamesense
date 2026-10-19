@@ -10,6 +10,7 @@
 #include <CS2/Classes/CSchemaSystem.h>
 #include <GameClient/SchemaSystem/ClientTypeScopePointer.h>
 #include <GameClient/SchemaSystem/SchemaReadiness.h>
+#include <Utils/SpinLock.h>
 #include <MemoryPatterns/PatternTypes/SchemaSystemPatternTypes.h>
 
 
@@ -269,6 +270,49 @@ public:
 
     [[nodiscard]] std::optional<std::int32_t> getFieldOffset(const char* className, const char* fieldName) const noexcept
     {
+        // Session-stable offset cache. Schema layouts never change while the
+        // game runs, yet ~20 features call this every frame - each miss walks
+        // the game's field list through 4 schema functions per field. The
+        // cache keys on the EXACT string pointers (all call sites pass
+        // literals, so the keys are stable); dynamic strings simply miss and
+        // take the slow path. Only successful lookups are cached - a pre-
+        // readiness miss must not pin a failure. Schema offsets resolve to
+        // the same value for every caller of a (class, field) pair, so the
+        // shared table needs a lock, not per-thread copies.
+        {
+            const std::lock_guard guard{offsetCacheLock};
+            for (const auto& entry : offsetCache) {
+                if (entry.className == className && entry.fieldName == fieldName)
+                    return entry.offset;
+            }
+        }
+
+        const auto resolved = resolveFieldOffset(className, fieldName);
+
+        if (resolved.has_value()) {
+            const std::lock_guard guard{offsetCacheLock};
+            for (auto& entry : offsetCache) {
+                if (entry.className == nullptr) {
+                    entry = OffsetCacheEntry{className, fieldName, *resolved};
+                    break;
+                }
+            }
+        }
+        return resolved;
+    }
+
+private:
+    struct OffsetCacheEntry {
+        const char* className;
+        const char* fieldName;
+        std::int32_t offset;
+    };
+    static constexpr int kOffsetCacheSize = 128;
+    inline static SpinLock offsetCacheLock;
+    inline static OffsetCacheEntry offsetCache[kOffsetCacheSize]{};
+
+    [[nodiscard]] std::optional<std::int32_t> resolveFieldOffset(const char* className, const char* fieldName) const noexcept
+    {
         const auto classBinding = findDeclaredClassOrEnum(className);
         const auto beginIterator = hookContext.patternSearchResults().template get<PointerToSchemaBeginFieldIterator>();
         const auto hasNext = hookContext.patternSearchResults().template get<PointerToSchemaFieldIteratorHasNext>();
@@ -290,8 +334,6 @@ public:
         return {};
     }
 
-private:
-    
     
     
     

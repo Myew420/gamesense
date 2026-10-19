@@ -229,12 +229,10 @@ private:
 
 public:
 
-    // Record-pose bone-cache swap (2026-10-15 audit, intentionally unwired):
-    // apply() temporarily swaps the LIVE skeleton cache for a record's bones so
-    // visibility traces answer "can I see the target AT THE RECORD TIME" instead
-    // of against the live pose (the aimbot's over-rejection of valid backtrack
-    // shots). Zero callers today: wiring it per evaluation mutates live game
-    // state on the hot path and needs an in-game perf/safety round first.
+    // temporarily swaps the LIVE skeleton cache for a record's bones so
+    // visibility traces answer "can I see the target at record time" instead of
+    // the live pose. intentionally unwired: per-evaluation use mutates live
+    // game state on the hot path, needs an in-game perf/safety round first.
     bool apply(const Record& record) const noexcept
     {
         if (!record.valid || applied.record != nullptr)
@@ -311,12 +309,10 @@ public:
     
     [[nodiscard]] Optional<Result> bestRecord(cs2::C_BaseEntity* entity, const cs2::Vector& eye, float pitch, float yaw, bool head, bool chest, bool stomach, bool arms, bool legs, int maxTicks) const noexcept
     {
-        // Real hitbox chain (2026-10-15 audit): score every wanted hitbox of
-        // every record against the game's own hitbox set - the model extents
-        // are static, the record's full bone snapshot provides the pose. The
-        // old hardcoded bone map {6,4,2,9,25} had an unconditional break, so
-        // backtrack degenerated to ONE point (the first wanted bone) and the
-        // guessed indices were never verified against the game.
+        // score every wanted hitbox of every record against the game's own
+        // hitbox set; model extents are static, the record's bone snapshot
+        // provides the pose. (the old hardcoded bone map {6,4,2,9,25} broke
+        // after the first wanted bone - one point only.)
         auto&& node = hookContext.template make<BaseEntity>(entity).gameSceneNode();
         if (!node)
             return {};

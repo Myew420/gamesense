@@ -45,9 +45,8 @@ TEST(EspProjection, MapsNdcToDisplayPercentsAndGatesBehind)
     EXPECT_FALSE(esp_detail::project(IdentityConverter{}, {nan, 0.0f, 1.0f}, x, y));
 }
 
-// The backup-health damage echo (hzqst's white bar): a health drop arms the
-// echo at the OLD health, fades out over 500ms, and lands/reset on expiry; a
-// heal or no-anim config shows nothing.
+// backup-health echo: a drop arms it at the OLD health, fades out over 500ms;
+// a heal or no-anim config shows nothing.
 TEST(EspBackupHealth, ArmsOnDamageDropAndFadesOut)
 {
     int lastHealth = 100, backupHealth = 100;
@@ -91,9 +90,7 @@ TEST(EspBackupHealth, ArmsOnDamageDropAndFadesOut)
 namespace
 {
 
-// Flat ground plane z=0 tracer: crossing segments hit at the plane, normal +Z;
-// everything else flies free. Walls/floor complexity are the game's, not ours -
-// the sim's math is what we pin here.
+// flat ground plane z=0 tracer: crossing segments hit at the plane, normal +Z.
 struct PlaneTracer {
     [[nodiscard]] Tracing::Result operator()(const cs2::Vector& from, const cs2::Vector& to, void*) const noexcept
     {

@@ -42,16 +42,12 @@ inline constexpr std::size_t kGeneratePrimitivesSlotOffset = 0x20;
 inline VTableSlotPatch patches[kTargetCount];
 inline std::uintptr_t addressPoints[kTargetCount]{};
 
-// DrawArray (vtable slot 1) patches for the ENEMY/TEAM chams passes. The material
-// write has to happen HERE, not in GeneratePrimitives: the game re-binds prim+0x20
-// back to the entity's own material between generation and the draw (2026-10-17
-// live gdb: at DrawArray the body prim carried the game's skin material despite our
-// post-GeneratePrimitives override; the +0x50 color survived on weapons only, which
-// is why "only the weapons got colors"). Both public chams references do it this
-// way - the xsip Windows chams hook the Render/draw call, FrameworkCS2 hooks this
-// exact DrawArray and swaps MeshDrawPrimitive.material right before the trampoline.
-// Slot 1 of CBaseSceneObjectDesc + CAggregateSceneObjectDesc belongs to the world
-// recolor hooks (scene_render_hooks) - we patch only the other three descs.
+// DrawArray (vtable slot 1) patches for the ENEMY/TEAM chams passes. the
+// material write must happen HERE, not in GeneratePrimitives: the game re-binds
+// prim+0x20 back to the entity's own material between generation and the draw
+// (a post-GeneratePrimitives override survives on weapons only, via the +0x50
+// color). slot 1 of CBaseSceneObjectDesc + CAggregateSceneObjectDesc belongs to
+// the world recolor hooks (scene_render_hooks) - we patch only the other three.
 inline constexpr int kDrawArrayTargetCount = 3;
 inline constexpr int kDrawArrayTargetIndices[kDrawArrayTargetCount] = {1, 2, 4}; // MeshBuilder, InstancedMesh, Animatable
 inline constexpr std::size_t kDrawArraySlotOffset = sizeof(void*);
@@ -128,8 +124,8 @@ inline void uninstall() noexcept
             allResolved = false;
         }
 
-        // DrawArray patch on the three chams-relevant descs (see the note above the
-        // drawArray arrays for why CBase/CAggregate are excluded).
+        // DrawArray patch on the three chams-relevant descs (CBase/CAggregate
+        // excluded, see the note above the drawArray arrays).
         for (int d = 0; d < kDrawArrayTargetCount; ++d) {
             if (kDrawArrayTargetIndices[d] != i)
                 continue;

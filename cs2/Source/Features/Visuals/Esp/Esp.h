@@ -26,16 +26,13 @@
 #include <Utils/Optional.h>
 #include <Utils/Trig.h>
 
-// Core ESP suite (FrameworkCS2 ESP.cpp/Player.cpp/Skeleton.hpp structure, our
-// idioms). Game-thread producer runs from the render-start chain (fresh view
-// matrix), walks players once and publishes draw primitives (percents-of-display)
+// Core ESP suite. Game-thread producer runs from the render-start chain (fresh
+// view matrix), walks players once and publishes percent-of-display primitives
 // through the OverlayLayer publish/snapshot; the present thread draws them in
-// renderGameOverlay. Box = the OBB-corner bounding rect (FrameworkCS2: project
-// the 8 collision-hull corners, pixel-round). Skeleton = the bone-pair list.
-// Bars = health/armor with the hzqst-style backup-health damage echo.
+// renderGameOverlay. Box = OBB-corner bounding rect (project the 8 collision-
+// hull corners), skeleton = bone-pair list, bars = health/armor + damage echo.
 
-// Pure helpers (no game state) - free functions so tests can exercise the
-// projection and the damage-echo state machine without a full hook context.
+// Pure helpers (no game state) so tests run without a full hook context.
 namespace esp_detail
 {
 
@@ -45,9 +42,8 @@ namespace esp_detail
 }
 
 // Percent-of-display projection; ok=false when behind the camera / degenerate w.
-// kMaxNdc gates near-camera-plane blowups: a bone with w barely > 0 projects to
-// |ndc| in the hundreds -> skeleton lines shooting across the monitor (the
-// 2026-10-12 in-game report). Points past +/-160% of the half-screen are junk.
+// kMaxNdc gates near-camera blowups: w barely > 0 projects to |ndc| in the
+// hundreds -> junk lines across the screen.
 inline constexpr float kMaxNdc = 1.6f;
 
 template <typename Converter>
@@ -69,18 +65,17 @@ template <typename Converter>
     return std::isfinite(xPercent) && std::isfinite(yPercent);
 }
 
-// The hzqst-style backup-health damage echo: returns (backupFill, backupRgba)
-// for this frame given the ring entry's state; rgba 0 = none. White bar fades
-// over 500ms with a smoothstep ease.
+// Backup-health damage echo: returns (backupFill, backupRgba) for this frame
+// given the ring entry's state; rgba 0 = none. White bar fades over 500ms
+// with a smoothstep ease.
 inline std::pair<float, std::uint32_t> advanceBackupHealth(int& lastHealth, int& backupHealth,
                                                            std::int64_t& lastChangeMs, int healthValue,
                                                            std::int64_t nowMs, bool animOn) noexcept
 {
     constexpr std::int64_t kBackupFadeMs = 500;
     if (lastHealth == 100 && backupHealth == 100 && lastChangeMs == 0) {
-        // First sighting: adopt the current health WITHOUT treating it as a
-        // drop (also stamps lastChangeMs so this branch never re-fires - a
-        // fresh slot otherwise swallows the first real damage drop).
+        // First sighting: adopt current health without treating it as a drop
+        // (stamps lastChangeMs so a fresh slot doesn't swallow the first real drop).
         lastHealth = healthValue;
         lastChangeMs = nowMs;
         return {0.0f, 0u};
@@ -166,9 +161,8 @@ public:
             } else if (!teammates) {
                 return;
             }
-            // Spectator sync (vesta): hide the complete player presentation
-            // while any live pawn observes us - never draw wall knowledge a
-            // live spectator could see.
+            // Spectator sync: hide the player while any live pawn observes us;
+            // never draw wall knowledge a live spectator could see.
             if (GET_CONFIG_VAR(spectator_sync_vars::Enabled)
                 && GET_CONFIG_VAR(spectator_sync_vars::HideWhileSpectated)
                 && hookContext.template make<SpectatorSync<HookContext>>().beingSpectated())
@@ -199,9 +193,7 @@ public:
     }
 
 private:
-    // Per-pawn bar state: damage echo bookkeeping + smoothed fill (the bars
-    // animate toward their target with an exponential ease instead of
-    // teleporting - the 2026-10-13 "smoother bars" request).
+    // Per-pawn bar state: damage echo bookkeeping + exponentially eased fill.
     struct BackupHealth {
         std::uint32_t handle{};
         int lastHealth{100};
@@ -255,7 +247,7 @@ private:
         return value;
     }
 
-    // Collision-hull OBB corners -> bounding rect (FrameworkCS2's box).
+    // Collision-hull OBB corners -> bounding rect.
     [[nodiscard]] bool boundingRect(auto&& converter, auto&& pawn, const cs2::Vector& origin,
                                      float& x, float& y, float& w, float& h) const noexcept
     {
@@ -335,7 +327,7 @@ private:
         const auto health = pawn.health();
         const int healthValue = health.hasValue() ? health.value() : 100;
 
-        // Backup-health echo state (hzqst's white damage-fade bar).
+        // Backup-health echo state (white damage-fade bar).
         auto& backup = backupSlot(hookContext.template make<BaseEntity>(pawn.baseEntity()).handle().value);
         const auto backupPair = esp_detail::advanceBackupHealth(
             backup.lastHealth, backup.backupHealth, backup.lastChangeMs, healthValue, nowMs,
@@ -346,8 +338,7 @@ private:
         const float right = bx + bw;
         const float bottom = by + bh;
 
-        // Threat highlight (vesta threat_module): enemies within 60u of us
-        // draw their box tinted red - the close-range danger read.
+        // Threat highlight: enemies within 60u draw their box tinted red.
         const auto threat = hookContext.template make<SpectatorSync<HookContext>>();
         const auto enemyFlag = pawn.isEnemy();
         const bool threatOn = threat.threatEnabled() && enemyFlag.has_value() && *enemyFlag && distance < 60.0f * 52.49f;
@@ -365,12 +356,8 @@ private:
             };
 
         // ---- Skeleton ----
-        // BONE-index pairs (vesta's live-tested CS2 list, NOT hitbox indices -
-        // CS2's hitbox 13-18 ordering differs from the CS:GO SDK order my first
-        // cut assumed, which drew shoulder-to-hand crossing lines):
-        // spine 1-2-3-4-23-6, head 6-7, right arm 6-9-10-11, left arm 6-13-14-15,
-        // right leg 1-17-18-19, left leg 1-20-21-22. Read straight from the
-        // bone cache via GameSceneNode::boneTransform.
+        // BONE-index pairs, NOT hitbox indices (CS2 hitbox ordering differs
+        // from the CS:GO SDK order). Read via GameSceneNode::boneTransform.
         if (GET_CONFIG_VAR(esp_vars::SkeletonEnabled)) {
             auto&& node = hookContext.template make<BaseEntity>(pawn.baseEntity()).gameSceneNode();
             if (node) {
@@ -413,8 +400,7 @@ private:
         }
 
         // ---- Head circle ----
-        // Centered on the head hitbox's real bone (the hitbox chain's live
-        // head), radius in px from config.
+        // Centered on the head hitbox's bone, radius in px from config.
         if (GET_CONFIG_VAR(esp_vars::HeadCircleEnabled) && scene.circleCount < overlay_layer::kMaxEspCircles) {
             auto&& node = hookContext.template make<BaseEntity>(pawn.baseEntity()).gameSceneNode();
             if (node) {
@@ -461,10 +447,8 @@ private:
                                                                     static_cast<std::uint32_t>(GET_CONFIG_VAR(esp_vars::SnaplineColor)), 1.0f};
 
         // ---- Bars ----
-        // Constant-px-width bars with a real gap from the box: the bar x is the
-        // box edge MINUS (gap + barWidth) converted to percent-of-display-width
-        // (the old bx - 0.12% left the 3px bar overlapping the box edge).
-        // Fills ease toward their target (exp smooth, ~12/s) so drops animate.
+        // Constant-px bars with a gap from the box: bar x = box edge minus
+        // (gap + barWidth) in percent-of-display. Fills ease exp (~12/s).
         auto& slot = backupSlot(hookContext.template make<BaseEntity>(pawn.baseEntity()).handle().value);
         const float dt = [&]() noexcept {
             const float raw = slot.seen ? static_cast<float>(nowMs - slot.lastDrawMs) * 0.001f : 1.0f;
@@ -480,8 +464,7 @@ private:
         }
 
         const float barWidth = static_cast<float>(GET_CONFIG_VAR(esp_vars::HealthBarWidth));
-        // percent-of-width of one px at a 1920 reference (display-relative boxes
-        // scale with the same percent math, so px->% needs the live width).
+        // one px as percent-of-display-width (1920 reference).
         const float pxPercent = displayWidthPercent();  // % of display width per px
         const float healthBarX = bx - (barWidth + 3.0f) * pxPercent;
         if (GET_CONFIG_VAR(esp_vars::HealthBarEnabled) && scene.barCount < overlay_layer::kMaxEspBars)
@@ -510,7 +493,7 @@ private:
                     text[len++] = static_cast<char>('0' + value % 10);
                     text[len] = '\0';
                     // Armor value rides the FILL TOP (follows the bar color
-                    // height) and is tinted like the bar - 2026-10-13 request.
+                    // height), tinted like the bar.
                     const auto armorColor = GET_CONFIG_VAR(esp_vars::ArmorColor);
                     scene.texts[scene.textCount++] = overlay_layer::EspText{
                         armorBarX + (barWidth + 2.5f) * pxPercent,
@@ -526,8 +509,8 @@ private:
             }
         }
         if (GET_CONFIG_VAR(esp_vars::HealthBarEnabled) && scene.textCount < overlay_layer::kMaxEspTexts) {
-            // HP value rides the FILL TOP (follows the bar color height) and
-            // is tinted like the bar - 2026-10-13 request.
+            // HP value rides the FILL TOP (follows the bar color height),
+            // tinted like the bar.
             char text[16]{};
             const int value = healthValue < 0 ? 0 : healthValue;
             int len = 0;
@@ -550,10 +533,9 @@ private:
             copyText(scene.texts[scene.textCount - 1].text, text);
         }
 
-        // ---- Damage echo number (the visible half of the damage echo) ----
-        // A floating "-N" at the box's right edge, rising and fading over the
-        // same 500ms window as the white bar band (the band alone was easy to
-        // miss in-game - 2026-10-12 report).
+        // ---- Damage echo number ----
+        // Floating "-N" at the box's right edge, rising and fading over the
+        // same 500ms window as the white bar band.
         if (GET_CONFIG_VAR(esp_vars::BackupHealthAnim) && backupRgba != 0) {
             constexpr std::int64_t kEchoLifeMs = 500;
             const std::int64_t age = nowMs - backup.lastChangeMs;
@@ -579,8 +561,7 @@ private:
         }
 
         // ---- Text ----
-        // Name sits just above the box (by - 1.0; the old by - 2.6 floated
-        // far over the head), font size from the NameSize config.
+        // Name sits just above the box (by - 1.0); font size from NameSize.
         if (GET_CONFIG_VAR(esp_vars::NameEnabled)) {
             const auto name = controllerName(pawn);
             if (name[0] && scene.textCount < overlay_layer::kMaxEspTexts) {
@@ -596,8 +577,7 @@ private:
                 copyText(scene.texts[scene.textCount - 1].text, weaponName);
             }
         }
-        // Distance sits just right of the box (right + 0.35, small font) - the
-        // old right + 0.8 parked it far from the enemy (2026-10-12 report).
+        // Distance sits just right of the box (right + 0.35, small font).
         if (GET_CONFIG_VAR(esp_vars::DistanceEnabled) && scene.textCount < overlay_layer::kMaxEspTexts) {
             // 52.49 hammer units per meter.
             const int meters = static_cast<int>(distance * (1.0f / 52.49f) + 0.5f);
@@ -661,8 +641,8 @@ private:
         }
     }
 
-    // Money = CCSPlayerController m_pInGameMoneyServices -> m_iAccount
-    // (PlayerList's proven chain), read through the pawn's controller handle.
+    // Money = CCSPlayerController m_pInGameMoneyServices -> m_iAccount,
+    // read through the pawn's controller handle.
     [[nodiscard]] Optional<int> controllerMoney(auto&& pawn) const noexcept
     {
         const auto controllerHandle = pawnValue<std::uint32_t>(pawn.baseEntity(), "C_CSPlayerPawn", "m_hController");
@@ -686,20 +666,18 @@ private:
         return value;
     }
 
-    // Percent-of-display-width per world px at the current display size (the
-    // bar-gap math converts px offsets into the box's percent space).
+    // Percent-of-display-width per world px; the bar-gap math converts px
+    // offsets into the box's percent space.
     [[nodiscard]] float displayWidthPercent() const noexcept
     {
-        // 100 percent over the live display width in px (ImGui-side knowledge
-        // the producer must not take); the bar math only needs the RATIO, so
-        // 100 / 1920 as a reference is fine when the real size is unknown.
+        // the bar math only needs the ratio; 100/1920 as the reference is
+        // fine when the real display size is unknown.
         return 100.0f / 1920.0f;
     }
 
-    // m_iszPlayerName is an INLINE char array on the controller (PlayerList's
-    // proven read): copy the bytes out - never reinterpret the field as a
-    // pointer (the name's own bytes as a pointer was the 2026-10-11 crash).
-    // Single static scratch buffer: game thread only, consumed immediately.
+    // m_iszPlayerName is an INLINE char array on the controller: copy the
+    // bytes out, never reinterpret the field as a pointer. Single static
+    // scratch buffer: game thread only, consumed immediately.
     [[nodiscard]] const char* controllerName(auto&& pawn) const noexcept
     {
         inlineNameBuffer[0] = '\0';

@@ -510,10 +510,9 @@ int searchGlowSubTab = 0;
 
 int rageSubTab = 0;
 constexpr const char* const kRageSubTabs[] = {"Aimbot", "Accuracy", "Anti Aim"};
-// Per-weapon-group rage editing: which group's vars the RAGE rows edit. Gameplay
-// resolves the active weapon's group (RageGroups.h) independently of this.
-// Weapon-config selector: entries 0..5 = the weapon groups, 6.. = specific guns
-// (RageWeaponDefs.h list, same order as gameplay resolution prefers them).
+// RAGE rows edit the selected group's vars; gameplay resolves the active
+// weapon's group (RageGroups.h) independently. Selector: 0..5 = weapon groups,
+// 6.. = specific guns (RageWeaponDefs.h order).
 int rageMenuGroup = 0;
 #define RAGE_MENU_NAME_X(W, def, pretty) pretty
 constexpr const char* const kRageMenuEntries[]{"Pistol", "SMG", "Rifle", "Shotgun", "Sniper", "LMG",
@@ -660,13 +659,9 @@ float motion(ImGuiID id, float target, float speed = 16.0f, float initial = -1.0
 
 
 
-// Motion-storage key. WARNING (live-verified 2026-10-09): ImHashData is CRC32-based and
-// LINEAR in the seed, so hand-picked (salt, id) pairs collide far more often than random
-// - the profile popover shipped three simultaneous collisions (outer-glow toggle vs the
-// glow-color row, fading-rgb-style toggle vs the rgb-speed slider, debug toggle vs the
-// sliders-color row), which made the knobs float mid-track and drift with the mouse.
-// When adding a motion row: pick a fresh salt and VERIFY no collision against every other
-// animKey pair in this file (incl. variable-id users: toggle/select/multiSelect/scale pill).
+// Motion-storage key. ImHashData is CRC32-based and LINEAR in the seed, so
+// hand-picked (salt, id) pairs collide often. New rows: pick a fresh salt and
+// verify no collision against every other animKey pair in this file.
 ImGuiID animKey(ImU32 salt, int id) noexcept
 {
     return ImHashData(&id, sizeof(id), salt);
@@ -1690,10 +1685,8 @@ void openFeatureBind(feature_binds::Entry* entry) noexcept
     styleSelect.open = false;
 }
 
-// A styled hover hint (replaces ImGui::SetTooltip): popover chrome - inset background,
-// hairline border, accent dot, small caption text - drawn on the FOREGROUND draw list so
-// it layers above popovers like the game's own tooltips, offset above-right of the cursor
-// and clamped to the viewport.
+// Styled hover hint on the FOREGROUND draw list (layers above popovers),
+// offset above-right of the cursor, clamped to the viewport.
 void styledHint(const char* text) noexcept
 {
     ImDrawList* d = ImGui::GetForegroundDrawList();
@@ -1804,8 +1797,8 @@ void featureBindPopover(ImDrawList* d) noexcept
         if (state.captureOwner == State::kFeatureBindCaptureOwner) {
             if (state.capture == State::Capture::WaitingRelease) {
                 state.captureAge += ImGui::GetIO().DeltaTime;
-                // 2026-10-05: one missed KEY-UP (alt-tab, focus loss, a dropped event) stuck the
-                // capture at "RELEASE ALL" forever - cap the phase at 2 seconds (same as keybindRow).
+                // a missed KEY-UP (alt-tab, focus loss) would stick the capture
+                // at "RELEASE ALL" forever; cap the phase at 2 seconds.
                 if (!gui_sdl::anyInputHeld() || state.captureAge > 2.0f)
                     state.capture = State::Capture::WaitingPress;
             } else if (state.capture == State::Capture::WaitingPress) {
@@ -2969,11 +2962,9 @@ int controlId = 0;
 
 
 constexpr int kCardSlotsPerPage = 48;
-// kMaxCardPages follows the Page enum (Page::Unsafe is the last page). The
-// 2026-10-11 Esp page insertion moved Misc to index 13 past this fixed 13
-// and the Misc cards indexed OOB -> garbage column plans (cards rendered
-// overlapping) + OOB height writes. The static_assert below pins the enum
-// to the array so any future page insertion breaks the BUILD instead.
+// kMaxCardPages follows the Page enum; a page inserted past a fixed count
+// indexed the cards OOB. The static_assert below pins the enum to the card
+// arrays so a future insertion breaks the build.
 constexpr int kMaxCardPages = static_cast<int>(Page::Unsafe) + 1;
 static_assert(static_cast<int>(Page::Unsafe) + 1 == 16, "kMaxCardPages/Page enum drifted - update the card plan arrays");
 float cardHeights[kMaxCardPages * kCardSlotsPerPage] = {};
@@ -3171,8 +3162,8 @@ void pageSubTabPills(ImDrawList* d, int& current, const char* const* labels, int
 }
 
 // ---- RAGE per-weapon-group rows ----
-// One row shape per group knob; rageGroupRow instantiates it for the group the
-// Weapon Group select points at. Gameplay always reads the ACTIVE weapon's group.
+// rageGroupRow instantiates the row for the Weapon Group select's group;
+// gameplay always reads the ACTIVE weapon's group.
 
 template <typename G> struct RageGroupBodyAimRow { void operator()(int id) const noexcept { toggleVar<rage_groups::BodyAim<G>>("Force Body Aim", id); } };
 template <typename G> struct RageGroupMultipointRow { void operator()(int id) const noexcept { toggleVar<rage_groups::Multipoint<G>>("Multipoint", id); } };
@@ -3216,9 +3207,8 @@ void rageGroupRow(Args&&... args) noexcept
     }
 }
 
-// The enabled row is label/type-split: groups gate the ragebot for that group
-// ("Group Enabled"), specific weapons switch their own config over the group's
-// ("Use Weapon Config", OverrideEnabled).
+// Enabled row is label/type-split: groups get "Group Enabled", specific
+// weapons get "Use Weapon Config" (OverrideEnabled).
 void rageEnabledRow(int id) noexcept
 {
     if (const int def = rageMenuWeaponDef(); def != 0) {
@@ -3255,7 +3245,7 @@ void pageRageAimbot() noexcept
         rageGroupRow<RageGroupDoubletapRow>(++controlId);
         toggleVar<Backtrack>("Backtrack", ++controlId);
         toggleVar<AutoStop>("Auto Stop", ++controlId);
-        // Don't shoot into smoke / while flashed (friend request 2026-10-13).
+        // Don't shoot into smoke / while flashed.
         toggleVar<IgnoreSmoke>("Don't Shoot Into Smoke", ++controlId);
         toggleVar<IgnoreFlash>("Don't Shoot While Flashed", ++controlId);
         toggleVar<DebugMultipoints>("Debug Multipoints", ++controlId);
@@ -3403,7 +3393,7 @@ void pageLegitAim() noexcept
         toggleVar<rcs_vars::Enabled>("Control Recoil", ++controlId);
         sliderVar<rcs_vars::Strength>("Pitch Strength", ++controlId, "%");
         // Separate horizontal strength: full X+Y returns the crosshair to the
-        // aim point, partial yaw drifts it sideways (friend report).
+        // aim point, partial yaw drifts it sideways.
         sliderVar<rcs_vars::YawStrength>("Yaw Strength", ++controlId, "%");
         toggleVar<no_scope_inaccuracy_vis_vars::Enabled>("No-scope Inaccuracy Vis", ++controlId);
         toggleVar<spread_circle_vars::Enabled>("Draw Weapon Spread", ++controlId);
@@ -3422,13 +3412,13 @@ void pageLegitTriggerbot() noexcept
         sliderVar<triggerbot_vars::DelayMilliseconds>("Min Reaction Delay", ++controlId, " ms");
         sliderVar<triggerbot_vars::DelayMillisecondsMax>("Max Reaction Delay", ++controlId, " ms");
         // Crosshair must HOLD on a target this long before the reaction
-        // delay begins (friend request).
+        // delay begins.
         sliderVar<triggerbot_vars::AimTimeMs>("Aim Time", ++controlId, " ms");
         cardDivider("ACCURACY");
         toggleVar<triggerbot_vars::AccuracyCheck>("Shoot When Accurate", ++controlId);
         sliderVar<triggerbot_vars::AccuracyRadius>("Max Bullet Deviation", ++controlId, " u");
-        // Hitbox selection: the ragebot's five hitgroups, on the real hitbox
-        // chain (Head/Chest/Stomach/Arms/Legs - friend request 2026-10-15).
+        // Hitbox selection: five hitgroups on the real hitbox chain
+        // (Head/Chest/Stomach/Arms/Legs).
         static constexpr const char* const kTriggerBones[]{"Head", "Chest", "Stomach", "Arms", "Legs"};
         multiSelectVar<triggerbot_vars::HitHead, triggerbot_vars::HitChest, triggerbot_vars::HitStomach,
                        triggerbot_vars::HitArms, triggerbot_vars::HitLegs>("Hitboxes", ++controlId, kTriggerBones);
@@ -3440,7 +3430,7 @@ void pageLegitTriggerbot() noexcept
         // Pause between shots at the same target while refiring.
         sliderVar<triggerbot_vars::RefireDelayMs>("Refire Delay", ++controlId, " ms");
         // Random 0.75..1.25 multiplier on every rolled delay (reaction, refire,
-        // aim time) so the click rhythm isn't a metronome (friend request).
+        // aim time) so the click rhythm isn't a metronome.
         toggleVar<triggerbot_vars::HumanizeDelays>("Humanize Delays", ++controlId);
     });
     addCard("TRIGGERBOT VISIBILITY", 7, [] {
@@ -3486,9 +3476,8 @@ void savedThrowRecordRow(const char* label, const char* buttonText, int id) noex
             auto&& localPawn = hookContext.activeLocalPlayerPawn();
             if (!localPawn)
                 return;
-            // Engine view angles (the CAMERA) straight off the CCSGOInput
-            // object the input hook captured - same source Movement's
-            // FastLadder uses, never cmd state.
+            // Engine view angles (camera) off the CCSGOInput object the input
+            // hook captured; same source as Movement's FastLadder, never cmd state.
             auto&& movement = hookContext.template make<Movement>();
             const auto angles = movement.engineViewAngles();
             const auto position = localPawn.baseEntity().absOrigin();
@@ -3553,8 +3542,8 @@ void pageEsp() noexcept
         sliderVar<NameSize>("Name Size", ++controlId, " pt");
         toggleVar<DistanceEnabled>("Distance", ++controlId);
     });
-    // FLAGS + CROSSHAIR cards live on Player Info / HUD (2026-10-13): flags are
-    // player info, the crosshair is a HUD element.
+    // FLAGS + CROSSHAIR cards live on Player Info / HUD: flags are player info,
+    // the crosshair is a HUD element.
     addCard("RADAR", 6, [] {
         toggleVar<radar_vars::Enabled>("Radar", ++controlId);
         sliderVar<radar_vars::Zoom>("Zoom", ++controlId, " u");
@@ -3618,9 +3607,9 @@ void pagePlayerInfo() noexcept
         toggleVar<BombCarrierIconEnabled>("Bomb Carrier Icon", ++controlId);
         toggleVar<BombPlantIconEnabled>("Bomb Planting Icon", ++controlId);
     });
-    // Our ESP flags (drawn next to the ESP box) replaced the old in-world state
-    // icons (2026-10-13); the weapon icon + ammo panels stay. The old icon keys
-    // stay registered (configs keep loading).
+    // ESP flags (next to the ESP box) replaced the old in-world state icons;
+    // weapon icon + ammo panels stay. Old icon keys stay registered so configs
+    // keep loading.
     addCard("FLAGS", 8, [] {
         toggleVar<esp_vars::FlagsEnabled>("Info Flags", ++controlId);
         toggleVar<esp_vars::FlagFlashed>("Flashed", ++controlId);
@@ -3783,13 +3772,11 @@ void pageViewmodel() noexcept
         toggleVar<ModifyFov>("Modify Viewmodel Fov", ++controlId);
         sliderVar<Fov>("Fov", ++controlId);
     });
-    addCard("VIEWMODEL POSITION", 6, [] {
+    addCard("VIEWMODEL POSITION", 4, [] {
         toggleVar<ModifyPosition>("Modify Position", ++controlId);
         floatSliderVar<OffsetX>("Offset X", ++controlId, " u");
         floatSliderVar<OffsetY>("Offset Y", ++controlId, " u");
         floatSliderVar<OffsetZ>("Offset Z", ++controlId, " u");
-        floatSliderVar<Pitch>("Pitch", ++controlId, " deg");
-        floatSliderVar<Roll>("Roll", ++controlId, " deg");
     });
 }
 
@@ -3818,18 +3805,6 @@ void pageChams() noexcept
         selectVar<chams_vars::OwnWeaponsMaterialType>("Material Type", chams_materials::kMaterialTypeNames, chams_materials::kMaterialTypeCount, ++controlId);
         colorVar<chams_vars::OwnWeaponsColor>("Color", ++controlId);
     });
-    addCard("MATERIALS", 1, [] {
-        // Material system status line (main thread only - the set is created from
-        // CreateMove; see the THREAD RULE in chams_hook::onGeneratePrimitives).
-        char chamsMaterialStatus[64] = "";
-        if (chams_materials::materialsReady())
-            std::snprintf(chamsMaterialStatus, sizeof(chamsMaterialStatus), "materials ready (%d types)", chams_materials::kMaterialTypeCount);
-        else if (!chams_materials::needsCreation())
-            std::snprintf(chamsMaterialStatus, sizeof(chamsMaterialStatus), "%s", chams_materials::lastError());
-        else
-            std::snprintf(chamsMaterialStatus, sizeof(chamsMaterialStatus), "pending first create");
-        textInputRow("Status", chamsMaterialStatus, sizeof(chamsMaterialStatus), ++controlId, ImGuiInputTextFlags_ReadOnly);
-    });
 }
 
 void pageEffects() noexcept
@@ -3851,15 +3826,12 @@ void pageEffects() noexcept
         toggleVar<RemoveFlashOverlay>("Remove Flash Overlay", ++controlId);
         toggleVar<RemoveMenuAds>("Remove Main Menu Ads", ++controlId);
     });
-    addCard("ANIMATIONS", 8, [] {
+    addCard("ANIMATIONS", 5, [] {
         toggleVar<animation_mod_vars::Freeze>("Freeze Client Animations", ++controlId);
         toggleVar<animation_mod_vars::DisableIK>("Disable Foot IK", ++controlId);
         toggleVar<animation_mod_vars::DisableRagdolls>("Disable Ragdolls", ++controlId);
         toggleVar<animation_mod_vars::ModifyRagdollScale>("Modify Ragdoll Scale", ++controlId);
         floatSliderVar<animation_mod_vars::RagdollScale>("Ragdoll Size", ++controlId);
-        toggleVar<animation_mod_vars::AnimateViewmodel>("Animate Viewmodel", ++controlId);
-        floatSliderVar<animation_mod_vars::ViewmodelSpinSpeed>("Viewmodel Spin", ++controlId, " deg/s");
-        floatSliderVar<animation_mod_vars::ViewmodelPitchSway>("Viewmodel Pitch Sway", ++controlId, " deg");
     });
     addCard("WORLD COLORS", 16, [] {
         toggleVar<WorldColorsInfernoEnabled>("Recolor Fire", ++controlId);
@@ -4163,10 +4135,9 @@ void pageMovement() noexcept
 }
 
 // ---- UNSAFE page ---------------------------------------------------------------------
-// Everything that abuses the net channel / seeds / packet-level state lives here
-// (the friend-approved consolidation): net lag, floods, server lagger, spread-seed
-// prediction and the FVA/net-spoof experiments. Widgets are the shared system,
-// just relocated - configs and gameplay code are untouched.
+// Net channel / seeds / packet-level state abuse lives here: net lag, floods,
+// server lagger, spread-seed prediction, FVA/net-spoof. Widgets are the shared
+// system, relocated; configs and gameplay code are untouched.
 
 void pageUnsafeNetwork() noexcept
 {
@@ -4992,12 +4963,10 @@ int inventoryCategory = 0;
 // pill row selects which team's config the model rows below read/write.
 int inventoryTeam = 0;
 
-// One row of two CT/T pills inside a card (the shared per-team selector).
-// Card-relative geometry like cardDivider(): draws at the current card row,
-// advances it; no search entry (navigational row).
-// idBase MUST differ per call site (KNIVES vs AGENT card): both cards render
-// in the same ImGui window and identical IDs = the "2 visible items with
-// conflicting ID" assert (the friend's report).
+// One row of two CT/T pills; card-relative geometry like cardDivider(), draws
+// at the current card row, advances it; no search entry.
+// idBase MUST differ per call site (KNIVES vs AGENT): same ImGui window,
+// identical IDs trigger the conflicting-ID assert.
 void teamPillsRow(int idBase) noexcept
 {
     static constexpr const char* const kTeamNames[]{"CT", "T"};
@@ -5069,9 +5038,8 @@ void inventoryPills(ImDrawList* d) noexcept
 
 
 
-// Stage the equipment icon for the next beginRow() label (inventory tab): looks the icon
-// up by defIndex, requests the rasterization if needed, and arms the card context so
-// beginRow draws it right of the label text.
+// Stage the equipment icon for the next beginRow() label: defIndex lookup +
+// rasterization request; beginRow draws it right of the label text.
 void stageRowIcon(std::uint16_t defIndex) noexcept
 {
     const char* iconName = vpk_icons::iconNameForDefIndex(defIndex);
@@ -5099,9 +5067,8 @@ void pageInventoryCategory(int category) noexcept
     using namespace skin_changer_vars;
     switch (category) {
     case 0: {
-        // Per-team knife model rows: the pill team selects which side's
-        // KnifeModelCT/TT the row edits; the shared finish/wear/seed/StatTrak
-        // rows apply to whichever knife the side holds.
+        // Pill team selects which side's KnifeModelCT/TT the row edits; the
+        // shared finish/wear/seed/StatTrak rows follow.
         const auto knifeModel = inventoryTeam == 0
             ? static_cast<KnifeModelSelection>(ui_config::get<KnifeModelCT>())
             : static_cast<KnifeModelSelection>(ui_config::get<KnifeModelTT>());
@@ -6177,7 +6144,7 @@ void pageScriptControls(int listPosition) noexcept
 
     ImDrawList* d = ImGui::GetWindowDrawList();
     char caption[96];
-    std::snprintf(caption, sizeof(caption), "SCRIPT - %s", script->name);
+    std::snprintf(caption, sizeof(caption), "SCRIPT - %.80s", script->name);
     text(d, ImVec2(x, y - s(16.0f)), C(89, 94, 106), caption, kTextCaption, nullptr);
     const ImVec2 cp(x, y);
     softShadow(d, cp, cp + ImVec2(width, height), s(14.0f));
@@ -7439,9 +7406,8 @@ void configPopover(ImDrawList* d, ImVec2 base) noexcept
     const float listHeight = ImMin(fullListHeight, ImMax(s(28), ImGui::GetMainViewport()->Size.y - s(210))) + s(6);
     static float configScroll = 0;
     if (ImGui::GetFrameCount() == configPopoverOpenedFrame) configScroll = 0;
-    // Sized to the actual content: 3 action buttons (30 each) + new-name input row
-    // (input 24 + buttons 28) + breathing room. The old flat 164 left a dead band at
-    // the bottom of the popover.
+    // Sized to the content: 3 action buttons (30 each) + new-name input row
+    // (input 24 + buttons 28).
     const float actionHeight = 3 * s(30.0f) + s(8.0f) + s(24.0f) + s(28.0f) + s(10.0f);
     ImVec2 p = base + ImVec2(kSidebarWidth + s(11), kToolbarHeight + s(4));
     const ImVec2 size(width, searchHeight + listHeight + actionHeight);
@@ -7455,8 +7421,7 @@ void configPopover(ImDrawList* d, ImVec2 base) noexcept
     d->AddLine(p + ImVec2(s(12), searchHeight), p + ImVec2(size.x - s(12), searchHeight), C(38, 38, 42));
 
     
-    // Search field inset matches the popover chrome (10px sides, 8px top) instead of
-    // hugging the border; height budget grew with searchHeight.
+    // Search field inset matches the popover chrome (10px sides, 8px top).
     ImGui::SetCursorScreenPos(p + ImVec2(s(10), s(8)));
     ImGui::PushItemWidth(width - s(20.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(s(6), s(4)));
@@ -8014,11 +7979,9 @@ void neverlose::drawMenuGlow(float menuAlpha) noexcept
     const int bC = static_cast<int>(bch * 255.0f);
     const int aC = static_cast<int>(glowColor.a() * ImSaturate(menuAlpha));
 
-    // BACKGROUND draw list, not foreground: the glow must layer UNDER the popover/script
-    // windows (ImGui windows render above the background list) - on the foreground list it
-    // painted the shell glow OVER every popover that bleeds past the shell (paintkit
-    // dropdowns, the config popover). The 20% translucent shell bg lets the inner rings
-    // bleed through slightly, which reads as the intended halo.
+    // BACKGROUND draw list: the glow must layer UNDER the popover/script
+    // windows (ImGui windows render above the background list); the
+    // foreground list painted it over popovers that bleed past the shell.
     ImDrawList* fg = ImGui::GetBackgroundDrawList();
     const ImVec2 display = ImGui::GetIO().DisplaySize;
     const ImVec2 shellPos((display.x - kShellWidth) * 0.5f + menuOffset.x, (display.y - shellHeightBase) * 0.5f + menuOffset.y);
@@ -8080,8 +8043,6 @@ void registerFeatureBinds() noexcept
     feature_binds::registerNumber<LegitStrafeStrength>("Legit Strafe Strength");
     feature_binds::registerNumber<LegitStrafeMouseThreshold>("Strafe Mouse Threshold");
     feature_binds::registerNumber<animation_mod_vars::RagdollScale>("Ragdoll Size");
-    feature_binds::registerNumber<animation_mod_vars::ViewmodelSpinSpeed>("Viewmodel Spin");
-    feature_binds::registerNumber<animation_mod_vars::ViewmodelPitchSway>("Viewmodel Pitch Sway");
 
     feature_binds::registerNumber<rcs_vars::Strength>("Strength");
     feature_binds::registerNumber<triggerbot_vars::DelayMilliseconds>("Min Reaction Delay");
@@ -8151,8 +8112,6 @@ void registerFeatureBinds() noexcept
     feature_binds::registerNumber<fva_vars::Substeps>("Chain Steps");
     feature_binds::registerNumber<radio_vars::Volume>("Volume");
 
-    feature_binds::registerNumber<viewmodel_mod_vars::Pitch>("Viewmodel Pitch");
-    feature_binds::registerNumber<viewmodel_mod_vars::Roll>("Viewmodel Roll");
     feature_binds::registerToggle<viewmodel_mod_vars::ModifyPosition>("Modify Viewmodel Position");
 
     using namespace aimbot_vars;
@@ -8203,7 +8162,6 @@ void registerFeatureBinds() noexcept
     feature_binds::registerToggle<animation_mod_vars::DisableIK>("Disable Foot IK");
     feature_binds::registerToggle<animation_mod_vars::DisableRagdolls>("Disable Ragdolls");
     feature_binds::registerToggle<animation_mod_vars::ModifyRagdollScale>("Modify Ragdoll Scale");
-    feature_binds::registerToggle<animation_mod_vars::AnimateViewmodel>("Animate Viewmodel");
 
     feature_binds::registerToggle<legit_aimbot_vars::TargetLock>("Legit Target Lock");
     feature_binds::registerToggle<legit_aimbot_vars::WallCheck>("Legit Aim Visible");
@@ -8303,7 +8261,7 @@ void neverlose::renderGameOverlay() noexcept
     
     
     // Bullet impact markers (BulletImpacts feature): fading world-anchored
-    // dots at the local player's bullet_impact points.
+    // dots at every player's bullet_impact points.
     if (snapshot.impactMarkerCount > 0) {
         const auto& io2 = ImGui::GetIO();
         constexpr float kImpactRadius = 4.0f;
@@ -8315,6 +8273,21 @@ void neverlose::renderGameOverlay() noexcept
             const ImU32 rgba = marker.rgba;
             const ImU32 color = C(rgba >> 24 & 0xFF, rgba >> 16 & 0xFF, rgba >> 8 & 0xFF, rgba & 0xFF);
             fg->AddCircleFilled(center, kImpactRadius, color, kImpactSegments);
+        }
+    }
+
+    // Bullet tracers (BulletTracers feature): fading muzzle->impact beams.
+    if (snapshot.tracerBeamCount > 0) {
+        const auto& io2 = ImGui::GetIO();
+        const ImVec2 display{io2.DisplaySize.x, io2.DisplaySize.y};
+        for (int i = 0; i < snapshot.tracerBeamCount; ++i) {
+            const auto& beam = snapshot.tracerBeams[i];
+            const ImU32 rgba = beam.rgba;
+            const ImU32 color = C(rgba >> 24 & 0xFF, rgba >> 16 & 0xFF, rgba >> 8 & 0xFF, rgba & 0xFF);
+            const ImVec2 start{beam.startXPercent * 0.01f * display.x, beam.startYPercent * 0.01f * display.y};
+            const ImVec2 end{beam.endXPercent * 0.01f * display.x, beam.endYPercent * 0.01f * display.y};
+            fg->AddLine(start, end, color, 1.6f);
+            fg->AddCircleFilled(end, 2.5f, color, 8);
         }
     }
 
@@ -8338,7 +8311,7 @@ void neverlose::renderGameOverlay() noexcept
     }
 
     // Rage debug multipoints: filled circles over the scanned point cloud
-    // (velocity's per-hitbox colors; centers draw larger).
+    // (per-hitbox colors; centers draw larger).
     if (snapshot.multiPointCount > 0) {
         const ImVec2 display = ImGui::GetIO().DisplaySize;
         for (int i = 0; i < snapshot.multiPointCount; ++i) {
@@ -8350,9 +8323,8 @@ void neverlose::renderGameOverlay() noexcept
         }
     }
 
-    // ESP font selector: 0 = Inter Medium (the menu body font, what the Player
-    // Info ammo panel uses), 1 = Inter SemiBold. Every ESP-family text draw
-    // goes through this so the suite stays consistent (2026-10-13 request).
+    // ESP font selector: 0 = Inter Medium, 1 = Inter SemiBold. Every
+    // ESP-family text draw goes through this.
     const int espFontIndex = static_cast<int>(ui_config::get<esp_vars::Font>());
     ImFont* const espFont = (ImGui::GetIO().Fonts->Fonts.Size > espFontIndex) ? ImGui::GetIO().Fonts->Fonts[espFontIndex] : nullptr;
 
@@ -8377,8 +8349,7 @@ void neverlose::renderGameOverlay() noexcept
                         C(ui_config::get<radar_vars::BombColor>() >> 24 & 0xFF, ui_config::get<radar_vars::BombColor>() >> 16 & 0xFF,
                           ui_config::get<radar_vars::BombColor>() >> 8 & 0xFF, ui_config::get<radar_vars::BombColor>() & 0xFF));
         }
-        // Dots clamp INSIDE the window (2026-10-13 report: enemies out of the
-        // window); the view cone follows the clamped dot.
+        // Dots clamp INSIDE the window; the view cone follows the clamped dot.
         const ImVec2 windowMin{center.x - size * 0.5f + s(6), center.y - size * 0.5f + s(6)};
         const ImVec2 windowMax{center.x + size * 0.5f - s(6), center.y + size * 0.5f - s(6)};
         for (int i = 0; i < snapshot.radar.dotCount; ++i) {
@@ -8532,7 +8503,7 @@ void neverlose::renderGameOverlay() noexcept
         }
     }
 
-    // Custom crosshair (vesta pieces): percent-of-display rects, black outline
+    // Custom crosshair: percent-of-display rects, black outline
     // behind each when outlinePx > 0. The penetration resolution is baked into
     // the rgba by the producer (green = can wallbang, red = blocked).
     if (snapshot.crosshair.pieceCount > 0) {
@@ -8701,15 +8672,10 @@ void neverlose::renderGameOverlay() noexcept
     // Bullet tracers are IN-GAME (the weapon's own tracer particle system) -
     // no overlay drawing.
 
-    // Kill-effect lightning: a strike FROM THE SKY down onto the victim's
-    // death spot. The producer projects BOTH the death spot and the world
-    // point straight above it (2500u up) and publishes them as screen
-    // percents; the draw side converts to pixels. The sky end is CAPPED at
-    // 1.5x screen height along its projected direction (so looking up sends
-    // the bolt through the top edge - it really comes from the sky), while
-    // degenerate flat/below-horizon cases fall back to a short vertical
-    // bolt (never sideways, never below the base = the floor-lines bug class
-    // is impossible by construction).
+    // Kill-effect lightning: sky-to-death-spot strike. Producer projects the
+    // death spot and the point 2500u above it as screen percents. Sky end is
+    // capped at 1.5x screen height along its direction; flat/below-horizon
+    // cases fall back to a short vertical bolt (never sideways or below base).
     if (snapshot.boltCount > 0) {
         constexpr int kBoltSegments = 12;
         constexpr float kScreenFlashTime = 0.45f;  // kill screen flash duration
@@ -9635,6 +9601,8 @@ void drawNowPlayingWindow(float combatListHeight) noexcept
 
 float drawCombatCountersWindow() noexcept
 {
+    if (!ui_config::get<combat_stats_vars::CountersEnabled>())
+        return 0.0f;
     if (!combat_stats_hud::hudLive.load(std::memory_order_relaxed))
         return 0.0f;
     const auto snap = combat_stats_hud::snapshot();
@@ -9709,6 +9677,8 @@ float drawCombatCountersWindow() noexcept
 
 float drawStatusChipsWindow() noexcept
 {
+    if (!ui_config::get<status_panel_vars::Enabled>())
+        return 0.0f;
     if (!combat_stats_hud::hudLive.load(std::memory_order_relaxed))
         return 0.0f;
 
@@ -9784,12 +9754,9 @@ float drawStatusChipsWindow() noexcept
     return listHeight;
 }
 
-// Watermark, ImGui-native (2026-10-13): replaces the retired Panorama panel
-// version, whose lazily-created panels froze on screen when the master toggle
-// went off (run() only early-returned - "turning it off doesn't disappear").
-// Draws from scratch every frame, so every toggle applies the very next frame,
-// and picks up the menu theme (g_accent, shared fonts, same chrome as the
-// other HUD boxes). Anchored top-right; drag with the menu open.
+// Watermark, ImGui-native: drawn from scratch every frame so toggles apply the
+// next frame; picks up the menu theme. The old Panorama panels froze on screen
+// when the toggle went off. Anchored top-right; drag with the menu open.
 float drawWatermarkWindow() noexcept
 {
     if (!ui_config::get<watermark_vars::Enabled>())
@@ -9858,9 +9825,8 @@ float drawWatermarkWindow() noexcept
         segmentWidths[i] = ImGui::GetFont()->CalcTextSizeA(kTextSmall, FLT_MAX, 0.0f, segments[i]).x;
         segmentsWidth += segmentWidths[i] + s(kSegmentGap);
     }
-    // Right padding: the dot's slot is paid on the left, so give the right the
-    // same s(kDotPad) instead of the bare padX - text was ending tight on the
-    // border (each segment already carries a trailing gap, which covers it).
+    // Right padding: the dot's slot is paid on the left, so the right gets the
+    // same s(kDotPad); segments already carry a trailing gap.
     const float padX = s(12.0f);
     const float winHeight = s(30.0f);
     const float winWidth = padX + s(kDotPad) + brandWidth + s(kBrandGap) + segmentsWidth + padX;
@@ -9960,6 +9926,8 @@ static int feedSegments(const combat_stats_hud::FeedEntry& entry, FeedSegmentDra
 
 float drawHitFeedWindow() noexcept
 {
+    if (!ui_config::get<combat_stats_vars::FeedEnabled>())
+        return 0.0f;
     if (!combat_stats_hud::hudLive.load(std::memory_order_relaxed))
         return 0.0f;
     const auto snap = combat_stats_hud::snapshot();
