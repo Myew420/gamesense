@@ -80,6 +80,7 @@
 #include <Features/Visuals/WorldColors/WorldColorsConfigVariables.h>
 #include <UI/ImGui/Neverlose/MenuThemeConfigVariables.h>
 #include <Features/Visuals/AnimationMods/AnimationModsConfigVariables.h>
+#include <Features/Visuals/BacktrackVisual/BacktrackVisualConfigVariables.h>
 #include <Utils/TypeList.h>
 
 using ConfigVariableTypes = TypeList<
@@ -279,6 +280,8 @@ using ConfigVariableTypes = TypeList<
     legit_aimbot_vars::HitArms,
     legit_aimbot_vars::HitLegs,
     legit_aimbot_vars::SpreadCircleFov,
+    legit_aimbot_vars::Backtrack,
+    legit_aimbot_vars::BacktrackTicks,
     spread_circle_vars::Enabled,
     spread_circle_vars::SpreadCircleColor,
     rcs_vars::Enabled,
@@ -747,5 +750,9 @@ using ConfigVariableTypes = TypeList<
     event_log_vars::LogMisses,
     event_log_vars::LogBomb,
     event_log_vars::LogRounds,
-    event_log_vars::LogConnects
+    event_log_vars::LogConnects,
+    backtrack_visual_vars::Enabled,
+    backtrack_visual_vars::ColorMode,
+    backtrack_visual_vars::Color,
+    backtrack_visual_vars::HideInSmoke
 >;

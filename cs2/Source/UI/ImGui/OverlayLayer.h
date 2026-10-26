@@ -411,6 +411,36 @@ inline void publishEsp(const EspScene& newScene) noexcept
     espScene = newScene;
 }
 
+// Backtrack record visualization (Features/Visuals/BacktrackVisual): per-record
+// ghost-skeleton lines + head-level dots/trail at the enemies' lag-compensated
+// positions, re-projected each frame on the game thread. A dedicated channel so
+// the whole-scene Esp publisher (last-writer-wins) never races it.
+struct BacktrackDot {
+    float xPercent;
+    float yPercent;
+    std::uint32_t rgba;
+    float radiusPx;
+};
+
+constexpr int kMaxBacktrackLines = 512;    // silhouette segments + trail (19 + 16 per enemy)
+constexpr int kMaxBacktrackDots = 128;     // silhouette head blobs (~16 per enemy)
+
+struct BacktrackScene {
+    EspLine lines[kMaxBacktrackLines];
+    int lineCount = 0;
+    BacktrackDot dots[kMaxBacktrackDots];
+    int dotCount = 0;
+};
+
+inline SpinLock backtrackLock;
+inline BacktrackScene backtrackScene;
+
+inline void publishBacktrackScene(const BacktrackScene& newScene) noexcept
+{
+    const std::lock_guard backtrackGuard{backtrackLock};
+    backtrackScene = newScene;
+}
+
 struct Snapshot {
     Arrow arrows[kMaxArrows];
     int count = 0;
@@ -433,6 +463,7 @@ struct Snapshot {
     int impactMarkerCount = 0;
     TracerBeam tracerBeams[kMaxTracerBeams];
     int tracerBeamCount = 0;
+    BacktrackScene backtrackScene;
 };
 
 [[nodiscard]] inline Snapshot snapshot() noexcept
@@ -470,6 +501,10 @@ struct Snapshot {
         s.tracerBeamCount = tracerBeamCount;
         for (int i = 0; i < tracerBeamCount; ++i)
             s.tracerBeams[i] = tracerBeams[i];
+    }
+    {
+        const std::lock_guard backtrackGuard{backtrackLock};
+        s.backtrackScene = backtrackScene;
     }
     {
         const std::lock_guard multiPointGuard{multiPointLock};

@@ -323,6 +323,8 @@ private:
         configConversion.boolean(u8"SpreadCircleFov", loadVariable<legit_aimbot_vars::SpreadCircleFov>(), saveVariable<legit_aimbot_vars::SpreadCircleFov>());
         configConversion.uint(u8"AimKey", loadVariable<legit_aimbot_vars::AimKey>(), saveVariable<legit_aimbot_vars::AimKey>());
         configConversion.uint(u8"FovCircleColor", loadVariable<legit_aimbot_vars::FovCircleColor>(), saveVariable<legit_aimbot_vars::FovCircleColor>());
+        configConversion.boolean(u8"Backtrack", loadVariable<legit_aimbot_vars::Backtrack>(), saveVariable<legit_aimbot_vars::Backtrack>());
+        configConversion.uint(u8"BacktrackTicks", loadVariable<legit_aimbot_vars::BacktrackTicks>(), saveVariable<legit_aimbot_vars::BacktrackTicks>());
         configConversion.endObject();
 
         configConversion.beginObject(u8"Rcs");
@@ -1189,6 +1191,13 @@ private:
 
         configConversion.beginObject(u8"WeaponReload");
         configConversion.boolean(u8"Enabled", loadVariable<WeaponReloadSoundVisualizationEnabled>(), saveVariable<WeaponReloadSoundVisualizationEnabled>());
+        configConversion.endObject();
+
+        configConversion.beginObject(u8"BacktrackVisual");
+        configConversion.boolean(u8"Enabled", loadVariable<backtrack_visual_vars::Enabled>(), saveVariable<backtrack_visual_vars::Enabled>());
+        configConversion.uint(u8"ColorMode", loadVariable<backtrack_visual_vars::ColorMode>(), saveVariable<backtrack_visual_vars::ColorMode>());
+        configConversion.uint(u8"Color", loadVariable<backtrack_visual_vars::Color>(), saveVariable<backtrack_visual_vars::Color>());
+        configConversion.boolean(u8"HideInSmoke", loadVariable<backtrack_visual_vars::HideInSmoke>(), saveVariable<backtrack_visual_vars::HideInSmoke>());
         configConversion.endObject();
 
         configConversion.endObject();

@@ -30,6 +30,7 @@
 #include <Features/Combat/Aimbot/Aimbot.h>
 #include <Features/Combat/DuckPeek.h>
 #include <Features/Visuals/Esp/Esp.h>
+#include <Features/Visuals/BacktrackVisual/BacktrackVisual.h>
 #include <Features/Visuals/Crosshair/CrosshairEsp.h>
 #include <Features/Visuals/Radar/RadarEsp.h>
 #include <Features/Visuals/BombInfo/BombInfoEsp.h>
@@ -499,6 +500,7 @@ int SDLHook_PeepEvents(void* events, int numevents, int action, unsigned minType
     hookContext.template make<Aimbot>().onUnload();
     hookContext.template make<DuckPeek<HookContext<GlobalContext>>>().onUnload();
     hookContext.template make<Esp<HookContext<GlobalContext>>>().onUnload();
+    hookContext.template make<BacktrackVisual<HookContext<GlobalContext>>>().onUnload();
     hookContext.template make<CrosshairEsp<HookContext<GlobalContext>>>().onUnload();
     hookContext.template make<RadarEsp<HookContext<GlobalContext>>>().onUnload();
     hookContext.template make<BombInfoEsp<HookContext<GlobalContext>>>().onUnload();
@@ -566,7 +568,7 @@ void Source2ClientHook_onFrameStageNotify(cs2::CSource2Client* thisptr, int fram
     
     
     
-    if (frameStage == 6 && (GET_CONFIG_VAR(aimbot_vars::Backtrack) || GET_CONFIG_VAR(aimbot_vars::Extrapolate) || GET_CONFIG_VAR(triggerbot_vars::Backtrack)))
+    if (frameStage == 6 && (GET_CONFIG_VAR(aimbot_vars::Backtrack) || GET_CONFIG_VAR(aimbot_vars::Extrapolate) || GET_CONFIG_VAR(triggerbot_vars::Backtrack) || GET_CONFIG_VAR(legit_aimbot_vars::Backtrack) || GET_CONFIG_VAR(backtrack_visual_vars::Enabled)))
         hookContext.template make<Lagcomp>().run();
 
     
@@ -1046,6 +1048,7 @@ void ViewRenderHook_onRenderStart(cs2::CViewRender* thisptr) noexcept
     hookContext.template make<SpectatorSync<HookContext<GlobalContext>>>().update();
     hookContext.template make<CrosshairEsp<HookContext<GlobalContext>>>().run();
     hookContext.template make<Esp<HookContext<GlobalContext>>>().run();
+    hookContext.template make<BacktrackVisual<HookContext<GlobalContext>>>().run();
     hookContext.template make<RadarEsp<HookContext<GlobalContext>>>().run();
     hookContext.template make<BombInfoEsp<HookContext<GlobalContext>>>().run();
     hookContext.template make<AntiAim<HookContext<GlobalContext>>>().onRenderUpdate();
