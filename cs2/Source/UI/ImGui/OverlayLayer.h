@@ -422,8 +422,16 @@ struct BacktrackDot {
     float radiusPx;
 };
 
-constexpr int kMaxBacktrackLines = 512;    // silhouette segments + trail (19 + 16 per enemy)
-constexpr int kMaxBacktrackDots = 128;     // silhouette head blobs (~16 per enemy)
+// 18 segments x 16 records = 288 lines for ONE fully drawn enemy. The old 512
+// held 1.78 enemies: once exhausted mid-enemy the emitter had already drawn
+// that record's spine/arms (segments are walked in order) but not its legs -
+// the visible "far ghost falls apart, only the head circle remains" bug, since
+// head blobs live on the separate (never exhausted) dot channel. 2880 holds 10
+// fully visible enemies; BacktrackVisual additionally reserves a full
+// silhouette's worth of lines per record so records are dropped whole, never
+// half-drawn.
+constexpr int kMaxBacktrackLines = 2880;   // 10 enemies x (18 segments x 16 records)
+constexpr int kMaxBacktrackDots = 192;     // 10 enemies x 16 head blobs (+ margin)
 
 struct BacktrackScene {
     EspLine lines[kMaxBacktrackLines];

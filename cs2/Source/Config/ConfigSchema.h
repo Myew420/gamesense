@@ -1198,6 +1198,7 @@ private:
         configConversion.uint(u8"ColorMode", loadVariable<backtrack_visual_vars::ColorMode>(), saveVariable<backtrack_visual_vars::ColorMode>());
         configConversion.uint(u8"Color", loadVariable<backtrack_visual_vars::Color>(), saveVariable<backtrack_visual_vars::Color>());
         configConversion.boolean(u8"HideInSmoke", loadVariable<backtrack_visual_vars::HideInSmoke>(), saveVariable<backtrack_visual_vars::HideInSmoke>());
+        configConversion.uint(u8"LingerMs", loadVariable<backtrack_visual_vars::LingerMs>(), saveVariable<backtrack_visual_vars::LingerMs>());
         configConversion.endObject();
 
         configConversion.endObject();

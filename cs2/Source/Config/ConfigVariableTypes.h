@@ -754,5 +754,6 @@ using ConfigVariableTypes = TypeList<
     backtrack_visual_vars::Enabled,
     backtrack_visual_vars::ColorMode,
     backtrack_visual_vars::Color,
-    backtrack_visual_vars::HideInSmoke
+    backtrack_visual_vars::HideInSmoke,
+    backtrack_visual_vars::LingerMs
 >;

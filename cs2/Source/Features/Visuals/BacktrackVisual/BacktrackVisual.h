@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
@@ -8,6 +9,7 @@
 #include <CS2/Classes/Entities/GrenadeProjectiles.h>
 #include <CS2/Classes/Vector.h>
 #include <Features/Visuals/BacktrackVisual/BacktrackVisualConfigVariables.h>
+#include <Features/Visuals/Esp/Esp.h> // esp_detail::project
 #include <GameClient/Entities/BaseEntity.h>
 #include <GameClient/Entities/PlayerPawn.h>
 #include <GameClient/EntitySystem/EntitySystem.h>
@@ -37,6 +39,20 @@
 // breaks across it too), and with HideInSmoke on, a record whose sight line
 // crosses an active smoke volume is hidden as well.
 //
+// x88-style persistence (2026-10-28 refinement): records do NOT pop off the
+// screen when they expire out of the unlag window (or the motion gate
+// closes) - the last drawn state is mirrored into a per-pawn linger cache
+// and keeps rendering at the oldest-record color, fading to nothing over
+// Ghost Linger ms. Wall/smoke checks are re-run every frame while fading, so
+// a lingering ghost can never show through geometry.
+//
+// Distance scaling (same refinement): stroke widths used to be fixed px, so
+// on a far player the 6.5px head blob swallowed the whole body - "only a
+// circle remains". The projected body length (feet -> head) now scales the
+// strokes down proportionally (clamped so the close-up look is unchanged),
+// and the overlay channel reserves a full silhouette per record so a record
+// is dropped WHOLE when the budget runs out - never half-drawn.
+//
 // Same producer/consumer shape as the Esp: this runs on the render-start
 // chain (fresh view matrix, same game thread that writes the Lagcomp slots),
 // re-projects the stored world positions each frame and publishes draw
@@ -55,6 +71,7 @@ public:
         if (!GET_CONFIG_VAR(backtrack_visual_vars::Enabled)) {
             if (wasActive)
                 overlay_layer::publishBacktrackScene(overlay_layer::BacktrackScene{});
+            clearCache();
             wasActive = false;
             return;
         }
@@ -64,17 +81,20 @@ public:
         const auto curtime = hookContext.globalVars().curtime();
         if (!localPawn || !curtime.hasValue() || curtime.value() < schema_readiness::kMinMapTime) {
             overlay_layer::publishBacktrackScene(overlay_layer::BacktrackScene{});
+            clearCache();
             wasActive = false;
             return;
         }
         const auto eye = localPawn.eyePosition();
         if (!eye.hasValue()) {
             overlay_layer::publishBacktrackScene(overlay_layer::BacktrackScene{});
+            clearCache();
             wasActive = false;
             return;
         }
 
         wasActive = true;
+        ++frameSerial;
         overlay_layer::BacktrackScene scene{};
 
         auto&& converter = hookContext.template make<WorldToClipSpaceConverter>();
@@ -83,6 +103,9 @@ public:
         const bool fixedColor = GET_CONFIG_VAR(backtrack_visual_vars::ColorMode) != 0;
         const auto fixedRgba = static_cast<std::uint32_t>(GET_CONFIG_VAR(backtrack_visual_vars::Color));
         const bool hideInSmoke = GET_CONFIG_VAR(backtrack_visual_vars::HideInSmoke);
+        const float lingerSeconds = static_cast<float>(GET_CONFIG_VAR(backtrack_visual_vars::LingerMs)) * 0.001f;
+        const bool lingerEnabled = lingerSeconds > 0.0f;
+        const float now = curtime.value();
         // Smoke spheres are enumerated ONCE per frame (not per record) - the
         // entity walk is too heavy to repeat 80 times a frame.
         cs2::Vector smokeCenters[kMaxSmokeSpheres];
@@ -99,51 +122,101 @@ public:
                 return;
             auto* const entity = static_cast<cs2::C_BaseEntity*>(entityIdentity.entity);
 
-            // Only while the character is in motion: ghosts while someone holds
-            // an angle are clutter, and the records freeze with them anyway.
-            if (!isMoving(entity))
-                return;
-
             // Every record the server would still credit (the unlag-budget
-            // filter lives in validRecords), newest first.
+            // filter lives in validRecords), newest first. count == 0 is the
+            // normal end-of-window state - the linger pass below still runs so
+            // the last drawn ghosts can fade out instead of popping.
             const typename Lagcomp<HookContext>::Record* records[Lagcomp<HookContext>::kMaxRecords];
             const int count = lagcomp.validRecords(entity, Lagcomp<HookContext>::kMaxRecords, records,
                                                    Lagcomp<HookContext>::kMaxRecords);
-            if (count <= 0)
+            if (count <= 0 && !lingerEnabled)
                 return;
 
             auto&& node = hookContext.template make<BaseEntity>(entity).gameSceneNode();
             if (!node)
-                return;
+                return; // half-gone entity: its cache slot stays untouched and the
+                        // orphan sweep below drops it (a ghost we cannot head-mark
+                        // or age is never drawn stale)
             const auto hitboxSet = Hitboxes::query(node.raw());
             const auto* const headHitbox = hitboxSet.find(0);
             const int headBone = (headHitbox && headHitbox->bone >= 0) ? headHitbox->bone : -1;
 
-            for (int r = 0; r < count; ++r) {
-                const auto& record = *records[r];
-                if (record.boneCount <= 0)
-                    continue;
-                const cs2::Vector chest{record.origin.x, record.origin.y, record.origin.z + kChestHeight};
+            // Linger cache slot for this pawn (only allocated while persistence
+            // is on). Touched every frame this pawn is visited.
+            GhostSlot* slot = lingerEnabled ? slotFor(entityIdentity.handle.value) : nullptr;
+            if (slot)
+                slot->touchedFrame = frameSerial;
 
-                // No wall-bang ghosts: a record the local eye cannot see
-                // directly (traced at chest height) is never drawn.
-                if (!Tracing::isVisible(eye.value(), chest, localPawn.baseEntity(), entity))
-                    continue;
-                // Same rule for smoke: a record inside an active smoke volume
-                // is hidden (the aimbot's geometric smoke-sphere test).
-                if (hideInSmoke && segmentCrossesSmoke(eye.value(), chest, smokeCenters, smokeCount))
-                    continue;
+            // Live ghosts: only while the character is in motion (a stationary
+            // player's records are clutter), every record wall- and
+            // smoke-checked at chest height. Records shown here are mirrored
+            // into the linger cache so they can fade rather than pop when any
+            // gate stops them (expiry, motion, death of the trail...).
+            if (count > 0 && isMoving(entity)) {
+                for (int r = 0; r < count; ++r) {
+                    const auto& record = *records[r];
+                    if (record.boneCount <= 0)
+                        continue;
+                    const cs2::Vector chest{record.origin.x, record.origin.y, record.origin.z + kChestHeight};
 
-                emitSilhouette(scene, converter, record,
-                               recordColor(age01Of(r, count), fixedColor, fixedRgba), headBone);
+                    // No wall-bang ghosts: a record the local eye cannot see
+                    // directly (traced at chest height) is never drawn.
+                    if (!Tracing::isVisible(eye.value(), chest, localPawn.baseEntity(), entity))
+                        continue;
+                    // Same rule for smoke: a record inside an active smoke volume
+                    // is hidden (the aimbot's geometric smoke-sphere test).
+                    if (hideInSmoke && segmentCrossesSmoke(eye.value(), chest, smokeCenters, smokeCount))
+                        continue;
+
+                    const float age01 = age01Of(r, count);
+                    if (slot)
+                        upsertRecord(*slot, record, now, frameSerial, age01);
+                    emitSilhouette(scene, converter, record,
+                                   recordColor(age01, fixedColor, fixedRgba), headBone);
+                }
+            }
+
+            // Linger pass: records drawn live in an EARLIER frame (expired out
+            // of the unlag window, motion gate closed, ...) keep showing at
+            // their last age color and fade to nothing over lingerSeconds.
+            // Wall/smoke checks are re-run every frame - a fading ghost never
+            // shows through geometry.
+            if (slot && lingerEnabled) {
+                for (auto& ghost : slot->records) {
+                    if (!ghost.used || ghost.lastLiveFrame == frameSerial)
+                        continue;
+                    const float age = now - ghost.lastSeen;
+                    if (age < 0.0f || age > lingerSeconds) {
+                        ghost.used = false;
+                        continue;
+                    }
+                    const cs2::Vector chest{ghost.origin.x, ghost.origin.y, ghost.origin.z + kChestHeight};
+                    if (!Tracing::isVisible(eye.value(), chest, localPawn.baseEntity(), entity))
+                        continue;
+                    if (hideInSmoke && segmentCrossesSmoke(eye.value(), chest, smokeCenters, smokeCount))
+                        continue;
+                    emitSilhouette(scene, converter, ghost,
+                                   recordColor(ghost.age01, fixedColor, fixedRgba,
+                                               1.0f - age / lingerSeconds),
+                                   headBone);
+                }
             }
         });
+
+        // Slots nobody visited this frame belong to an enemy that died or
+        // left: there is no live entity to wall-check against anymore, so the
+        // cache is dropped instead of drawn (the wall rule outranks the fade).
+        for (auto& slot : ghostSlots)
+            if (slot.used && slot.touchedFrame != frameSerial)
+                resetSlot(slot);
+
         overlay_layer::publishBacktrackScene(scene);
     }
 
     void onUnload() const noexcept
     {
         wasActive = false;
+        clearCache();
         overlay_layer::publishBacktrackScene(overlay_layer::BacktrackScene{});
     }
 
@@ -151,9 +224,12 @@ private:
     // Age color: record 0 (newest) is fully lit, the oldest keeps a third of
     // its alpha so the history reads as a comet tail instead of uniform noise.
     // Gradient mode runs green -> red across the window; fixed mode keeps the
-    // user's color and only fades the alpha.
-    [[nodiscard]] static std::uint32_t recordColor(float age01, bool fixedColor, std::uint32_t fixedRgba) noexcept
+    // user's color and only fades the alpha. `fade` is the linger multiplier
+    // (1 for live records, decaying to 0 as an expired ghost disappears).
+    [[nodiscard]] static std::uint32_t recordColor(float age01, bool fixedColor, std::uint32_t fixedRgba,
+                                                   float fade = 1.0f) noexcept
     {
+        age01 = std::clamp(age01, 0.0f, 1.0f);
         std::uint32_t r, g, b, baseAlpha;
         if (fixedColor) {
             r = fixedRgba >> 24 & 0xFF;
@@ -166,7 +242,7 @@ private:
             b = 40;
             baseAlpha = 230;
         }
-        const float alphaScale = 1.0f - 0.7f * age01;
+        const float alphaScale = (1.0f - 0.7f * age01) * std::clamp(fade, 0.0f, 1.0f);
         const auto alpha = static_cast<std::uint32_t>(static_cast<float>(baseAlpha) * alphaScale + 0.5f);
         return (r << 24) | (g << 16) | (b << 8) | alpha;
     }
@@ -179,11 +255,14 @@ private:
     // The model-ghost silhouette: the record's captured bones drawn as FAT
     // translucent body segments (thick spine, arms, legs) plus a head blob -
     // the overlapping strokes blend into a soft humanoid ghost, unlike the
-    // skeleton's hairlines. Thickness is fixed px; at range the ghost reads
-    // as a solid blob, which is the desired "colored model ghost" look.
-    template <typename Converter>
+    // skeleton's hairlines. Thickness is scaled by the projected body length
+    // (kReferenceBodyPx and below shrink proportionally, never grow) so a
+    // far player reads as a small ghost instead of one dominating circle.
+    // Works on both Lagcomp::Record and the linger cache's GhostRecord - the
+    // shared access shape is {origin, boneCount, bones[i].position}.
+    template <typename Converter, typename RecordT>
     static void emitSilhouette(overlay_layer::BacktrackScene& scene, Converter& converter,
-                               const typename Lagcomp<HookContext>::Record& record, std::uint32_t rgba,
+                               const RecordT& record, std::uint32_t rgba,
                                int headBone) noexcept
     {
         struct Segment { int from; int to; float thickness; };
@@ -203,11 +282,30 @@ private:
         constexpr int kSegmentCount = static_cast<int>(sizeof(kSegments) / sizeof(kSegments[0]));
         constexpr int kMaxBoneIdx = 23;
 
+        // All-or-nothing budget: reserve room for the WHOLE silhouette before
+        // drawing any of it. The old code drew segments until the channel ran
+        // out mid-record (spine + arms visible, legs cut - "the bottom
+        // disappears") and leaned on the never-exhausted dot channel for the
+        // head, leaving a lone circle. With the raised budget this trips only
+        // past 10 fully visible enemies, and then whole records drop instead.
+        if (scene.lineCount + kSegmentCount > overlay_layer::kMaxBacktrackLines)
+            return;
+
+        const int probeBone = headBone >= 0 && headBone < record.boneCount ? headBone : 7;
+        float scale = 1.0f;
+        if (probeBone < record.boneCount) {
+            float footX, footY, headX, headY;
+            if (esp_detail::project(converter, record.origin, footX, footY)
+                && esp_detail::project(converter, record.bones[probeBone].position, headX, headY)) {
+                const float bodyPx = trig::squareRoot((headX - footX) * (headX - footX)
+                                                    + (headY - footY) * (headY - footY));
+                scale = std::clamp(bodyPx / kReferenceBodyPx, kMinScale, 1.0f);
+            }
+        }
+
         float projected[kMaxBoneIdx + 1][2]{};
         bool ok[kMaxBoneIdx + 1]{};
         for (const auto& segment : kSegments) {
-            if (scene.lineCount >= overlay_layer::kMaxBacktrackLines)
-                break;
             const int from = segment.from;
             const int to = segment.to;
             if (!ok[from] && from < record.boneCount)
@@ -222,16 +320,19 @@ private:
                 continue;
             scene.lines[scene.lineCount++] = overlay_layer::EspLine{projected[from][0], projected[from][1],
                                                                     projected[to][0], projected[to][1],
-                                                                    rgba, segment.thickness};
+                                                                    rgba,
+                                                                    std::max(1.0f, segment.thickness * scale)};
         }
 
         // The head blob (slightly bigger than a trail dot) rounds out the
-        // silhouette; the head bone doubles as its center.
-        const int blobBone = headBone >= 0 && headBone < record.boneCount ? headBone : 7;
+        // silhouette; the head bone doubles as its center. Scaled with the
+        // body like the strokes, with a visibility floor.
+        const int blobBone = probeBone;
         if (blobBone < record.boneCount && scene.dotCount < overlay_layer::kMaxBacktrackDots) {
             float hx, hy;
             if (esp_detail::project(converter, record.bones[blobBone].position, hx, hy))
-                scene.dots[scene.dotCount++] = overlay_layer::BacktrackDot{hx, hy, rgba, kHeadBlobRadiusPx};
+                scene.dots[scene.dotCount++] = overlay_layer::BacktrackDot{
+                    hx, hy, rgba, std::max(kMinBlobRadiusPx, kHeadBlobRadiusPx * scale)};
         }
     }
 
@@ -297,10 +398,126 @@ private:
         return false;
     }
 
+    // ---- Linger cache (x88-style persistence) ----------------------------
+    // Mirrors of records that were drawn live, kept after they leave
+    // validRecords so they can fade instead of popping. Keyed by pawn handle;
+    // only the bone positions the silhouette actually uses are stored (the
+    // overlay resamples at 24 bones), not the full 128-bone snapshot.
+    static constexpr int kLingerBones = 24; // silhouette bone indices stop at 23 (head/limbs)
+    static constexpr int kMaxRecords = Lagcomp<HookContext>::kMaxRecords;
+    static constexpr int kGhostSlots = 16;  // enemy pawns (a 5v5 lobby uses 5)
+
+    // .position keeps the access shape identical to Lagcomp::Bone so the
+    // shared emitSilhouette works on live records and ghosts alike.
+    struct GhostBone { cs2::Vector position; };
+
+    struct GhostRecord {
+        bool used{false};
+        float simTime{};                    // identity: matches Lagcomp record simulationTime
+        float lastSeen{};                   // curtime of the last frame drawn live
+        std::uint32_t lastLiveFrame{};      // frame serial of the last frame drawn live
+        float age01{};                      // age color it had while live (continuity)
+        cs2::Vector origin{};               // feet position for the chest-height checks
+        int boneCount{0};                   // clamped to kLingerBones
+        GhostBone bones[kLingerBones]{};
+    };
+
+    struct GhostSlot {
+        bool used{false};
+        std::uint32_t handle{0};
+        std::uint32_t touchedFrame{0};
+        GhostRecord records[kMaxRecords]{};
+    };
+
+    [[nodiscard]] static GhostSlot* slotFor(std::uint32_t handle) noexcept
+    {
+        GhostSlot* spare = nullptr;
+        for (auto& slot : ghostSlots) {
+            if (slot.used) {
+                if (slot.handle == handle)
+                    return &slot;
+                continue;
+            }
+            if (!spare)
+                spare = &slot;
+        }
+        if (!spare) {
+            // More live enemies than slots (never in practice): evict the
+            // pawn seen longest ago.
+            spare = &ghostSlots[0];
+            for (auto& slot : ghostSlots)
+                if (slot.touchedFrame < spare->touchedFrame)
+                    spare = &slot;
+        }
+        resetSlot(*spare);
+        spare->used = true;
+        spare->handle = handle;
+        spare->touchedFrame = frameSerial;
+        return spare;
+    }
+
+    // Mirror a record just drawn live into the cache: refreshed in place when
+    // the simulation time matches (the common per-frame path), oldest evicted
+    // when the per-pawn record array is full.
+    static void upsertRecord(GhostSlot& slot, const typename Lagcomp<HookContext>::Record& record,
+                             float now, std::uint32_t frame, float age01) noexcept
+    {
+        GhostRecord* spare = nullptr;
+        for (auto& ghost : slot.records) {
+            if (ghost.used) {
+                if (std::fabs(ghost.simTime - record.simulationTime) < 1e-4f) {
+                    refreshGhost(ghost, record, now, frame, age01);
+                    return;
+                }
+                continue;
+            }
+            if (!spare)
+                spare = &ghost;
+        }
+        if (!spare) {
+            spare = &slot.records[0];
+            for (auto& ghost : slot.records)
+                if (ghost.lastSeen < spare->lastSeen)
+                    spare = &ghost;
+        }
+        refreshGhost(*spare, record, now, frame, age01);
+    }
+
+    static void refreshGhost(GhostRecord& ghost, const typename Lagcomp<HookContext>::Record& record,
+                             float now, std::uint32_t frame, float age01) noexcept
+    {
+        ghost.used = true;
+        ghost.simTime = record.simulationTime;
+        ghost.lastSeen = now;
+        ghost.lastLiveFrame = frame;
+        ghost.age01 = age01;
+        ghost.origin = record.origin;
+        ghost.boneCount = record.boneCount < kLingerBones ? record.boneCount : kLingerBones;
+        for (int i = 0; i < ghost.boneCount; ++i)
+            ghost.bones[i].position = record.bones[i].position;
+    }
+
+    static void resetSlot(GhostSlot& slot) noexcept
+    {
+        slot = GhostSlot{};
+    }
+
+    static void clearCache() noexcept
+    {
+        for (auto& slot : ghostSlots)
+            if (slot.used)
+                resetSlot(slot);
+    }
+
     static constexpr float kHeadBlobRadiusPx = 6.5f;
+    static constexpr float kMinBlobRadiusPx = 2.0f;
     static constexpr float kTorsoThickness = 13.0f;
     static constexpr float kLimbThickness = 8.0f;
     static constexpr float kNeckThickness = 6.0f;
+    // Player height (px) at which the fixed thicknesses above were tuned;
+    // below it all strokes scale down proportionally (emitSilhouette).
+    static constexpr float kReferenceBodyPx = 240.0f;
+    static constexpr float kMinScale = 0.25f;
     // Chest height for the per-record wall/smoke checks - the middle of the
     // player hull, so a record behind cover is rejected even when its head
     // would peek.
@@ -310,6 +527,8 @@ private:
     static constexpr int kMaxSmokeSpheres = 16;
 
     inline static bool wasActive = false;
+    inline static std::uint32_t frameSerial = 0;
+    inline static GhostSlot ghostSlots[kGhostSlots]{};
 
     HookContext& hookContext;
 };

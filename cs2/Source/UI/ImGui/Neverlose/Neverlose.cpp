@@ -3386,7 +3386,7 @@ void pageLegitAim() noexcept
         selectVar<TargetSelection>("Target Selection", modes, 3, ++controlId);
         toggleVar<TargetLock>("Lock Target", ++controlId);
     });
-    addCard("BACKTRACK", 6, [] {
+    addCard("BACKTRACK", 7, [] {
         toggleVar<Backtrack>("Backtrack", ++controlId);
         sliderVar<BacktrackTicks>("Backtrack Ticks", ++controlId);
         toggleVar<backtrack_visual_vars::Enabled>("Backtrack Visual", ++controlId);
@@ -3395,6 +3395,8 @@ void pageLegitAim() noexcept
         selectVar<backtrack_visual_vars::ColorMode>("Marker Color", kColorModes, 2, ++controlId);
         colorVar<backtrack_visual_vars::Color>("Fixed Color", ++controlId);
         toggleVar<backtrack_visual_vars::HideInSmoke>("Hide In Smoke", ++controlId);
+        // x88-style persistence: how long expired ghosts linger before fading.
+        sliderVar<backtrack_visual_vars::LingerMs>("Ghost Linger", ++controlId, " ms");
     });
     addCard("HITBOXES", 1, [] {
         static constexpr const char* const kHitboxNames[]{ "Head", "Chest", "Stomach", "Arms", "Legs" };
