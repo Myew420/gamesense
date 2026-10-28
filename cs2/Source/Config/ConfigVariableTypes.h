@@ -50,6 +50,7 @@
 #include <Features/Game/TeamDamageConfigVariables.h>
 #include <Features/Hud/HudThemeColorConfigVariables.h>
 #include <Features/Misc/DiscordRpcConfigVariables.h>
+#include <Features/Misc/Freecam/FreecamConfigVariables.h>
 #include <Features/Game/AgentChangerConfigVariables.h>
 #include <Features/Game/GrenadeAimConfigVariables.h>
 #include <Features/Visuals/BulletImpacts/BulletImpactsConfigVariables.h>
@@ -358,6 +359,8 @@ using ConfigVariableTypes = TypeList<
     radio_vars::MicBroadcast,
     MenuStyleRainbow,
     discord_rpc_vars::Enabled,
+    freecam_vars::Enabled,
+    freecam_vars::Speed,
     hud_theme_vars::Enabled,
     grenade_aim_vars::Enabled,
     bullet_impacts_vars::Enabled,

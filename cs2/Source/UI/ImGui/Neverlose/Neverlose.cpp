@@ -123,6 +123,7 @@
 #include <Features/Hud/StatusPanel/StatusPanelConfigVariables.h>
 #include <Features/Visuals/Removals/RemovalsConfigVariables.h>
 #include <Features/Visuals/ThirdPerson/ThirdPersonConfigVariables.h>
+#include <Features/Misc/Freecam/FreecamConfigVariables.h>
 #include <Features/Visuals/ViewmodelMod/ViewmodelModConfigVariables.h>
 #include <Features/Visuals/WorldColors/WorldColorsConfigVariables.h>
 
@@ -3829,10 +3830,12 @@ void pageEffects() noexcept
         floatSliderVar<HitmarkerTimeout>("Fade Time (ms)", ++controlId);
         colorVar<HitmarkerColor>("Marker Color", ++controlId);
     });
-    addCard("CAMERA", 3, [] {
+    addCard("CAMERA", 5, [] {
         toggleVar<ForceThirdPersonEnabled>("Force Third Person", ++controlId);
         floatSliderVar<ForceThirdPersonDistance>("Distance", ++controlId);
         toggleVar<RemoveViewPunch>("Remove View Punch", ++controlId);
+        toggleVar<freecam_vars::Enabled>("Freecam", ++controlId);
+        floatSliderVar<freecam_vars::Speed>("Freecam Speed", ++controlId);
     });
     addCard("REMOVALS", 3, [] {
         toggleVar<RemoveLegs>("Remove First-Person Legs", ++controlId);
@@ -8074,6 +8077,7 @@ void registerFeatureBinds() noexcept
     feature_binds::registerNumber<HitmarkerGap>("Gap");
     feature_binds::registerNumber<HitmarkerTimeout>("Fade Time (ms)");
     feature_binds::registerNumber<ForceThirdPersonDistance>("Distance");
+    feature_binds::registerNumber<freecam_vars::Speed>("Freecam Speed");
     feature_binds::registerNumber<WorldColorsSkyBrightness>("Sky Brightness");
     feature_binds::registerNumber<WorldColorsFogDensity>("Fog Density");
     feature_binds::registerNumber<WorldColorsFogDistance>("Fog Distance");
@@ -8201,6 +8205,7 @@ void registerFeatureBinds() noexcept
     feature_binds::registerToggle<viewmodel_mod_vars::ModifyFov>("Modify Viewmodel Fov");
     feature_binds::registerToggle<::HitmarkerEnabled>("Hit Marker");
     feature_binds::registerToggle<::ForceThirdPersonEnabled>("Force Third Person");
+    feature_binds::registerToggle<freecam_vars::Enabled>("Freecam");
     feature_binds::registerToggle<::RemoveViewPunch>("Remove View Punch");
     feature_binds::registerToggle<::RemoveLegs>("Remove First-Person Legs");
     feature_binds::registerToggle<::RemoveFlashOverlay>("Remove Flash Overlay");

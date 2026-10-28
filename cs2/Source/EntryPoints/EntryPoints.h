@@ -57,6 +57,7 @@
 #include <Features/Radio/RadioManager.h>
 #include <Features/Radio/SoundBoard.h>
 #include <Features/Misc/DiscordRpc.h>
+#include <Features/Misc/Freecam/Freecam.h>
 #include <Features/Hud/HudThemeColor.h>
 #include <Features/SkinChanger/SkinChanger.h>
 #include <Features/Game/AgentChanger.h>
@@ -486,6 +487,7 @@ int SDLHook_PeepEvents(void* events, int numevents, int action, unsigned minType
     
     hookContext.template make<Removals>().onUnload();
     hookContext.template make<ViewmodelMod>().onUnload();
+    hookContext.template make<Freecam>().onUnload();
     scene_render_hooks::uninstall();
     team_select_guard::uninstall();
     chams_hook::uninstall();
@@ -967,6 +969,10 @@ std::uint64_t CSGOInputHook_onWriteMoveCrc(cs2::CCSGOInput* thisptr, cs2::CUserC
         hookContext.template make<FvaEmulator>().onWriteMoveCrcLate(cmd);
         // Commit movement against the final command view basis.
         hookContext.template make<Bunnyhop>().onWriteMoveCrc(cmd);
+        // Freecam: zero the command's movement so the body stays put while
+        // the camera flies (runs after Bunnyhop so its staged jumps don't
+        // move the player either).
+        hookContext.template make<Freecam>().onWriteMoveCrc(cmd);
 
         
         
@@ -1246,6 +1252,8 @@ void ClientModeHook_onOverrideView(cs2::ClientModeCSNormal* thisptr, ViewSetup* 
 
     hookContext.template make<ForceThirdPerson>().overrideView(viewSetup);
     hookContext.template make<Removals>().overrideView(viewSetup);
+    // Freecam last: it fully owns the camera position while engaged.
+    hookContext.template make<Freecam>().overrideView(viewSetup);
 }
 
 

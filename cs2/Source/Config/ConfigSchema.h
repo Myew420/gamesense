@@ -25,6 +25,7 @@ public:
         gameObject(configConversion);
         menuObject(configConversion);
         discordRpcObject(configConversion);
+        freecamObject(configConversion);
         inventoryChangerObject(configConversion);
         chatToolsObject(configConversion);
         combatStatsObject(configConversion);
@@ -92,6 +93,14 @@ private:
     {
         configConversion.beginObject(u8"DiscordRpc");
         configConversion.boolean(u8"Enabled", loadVariable<discord_rpc_vars::Enabled>(), saveVariable<discord_rpc_vars::Enabled>());
+        configConversion.endObject();
+    }
+
+    void freecamObject(auto&& configConversion)
+    {
+        configConversion.beginObject(u8"Freecam");
+        configConversion.boolean(u8"Enabled", loadVariable<freecam_vars::Enabled>(), saveVariable<freecam_vars::Enabled>());
+        configConversion.floating(u8"Speed", loadVariable<freecam_vars::Speed>(), saveVariable<freecam_vars::Speed>());
         configConversion.endObject();
     }
 
