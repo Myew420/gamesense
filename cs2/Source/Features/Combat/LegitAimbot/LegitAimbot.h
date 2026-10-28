@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include <CS2/Classes/CUserCmd.h>
+#include <CS2/Classes/Entities/C_CSPlayerPawn.h>
 #include <CS2/Classes/Vector.h>
 #include <Features/Combat/AimTarget.h>
 #include <Features/Combat/LegitAimbot/LegitAimbotConfigVariables.h>
@@ -10,6 +11,7 @@
 #include <Features/Combat/ShotGeometry.h>
 #include <Features/Combat/SubtickShotWriter.h>
 #include <Features/Game/StrafeCommand.h>
+#include <GameClient/Entities/PlayerPawn.h>
 #include <GameClient/Lagcomp.h>
 #include <GameClient/Tracing/Tracing.h>
 #include <GameClient/Bind.h>
@@ -91,11 +93,28 @@ public:
             if (auto* const instance = hookContext.template make<EntitySystem>().getEntityFromHandle(cs2::CEntityHandle{lastTargetHandleValue}))
                 preferredTarget = static_cast<cs2::C_BaseEntity*>(instance);
         }
-        const auto aim = aimTarget.acquire(eye.value(), currentPitch.value(), currentYaw.value(), maxFov, hitboxFlags(),
-            [&](const auto& candidate) {
-                return !GET_CONFIG_VAR(legit_aimbot_vars::WallCheck)
-                    || Tracing::isVisible(eye.value(), candidate.aimPoint, localPawn.baseEntity(), candidate.entity);
-            }, preferredTarget, static_cast<target_selection::Mode>(static_cast<std::uint8_t>(GET_CONFIG_VAR(legit_aimbot_vars::TargetSelection))));
+        const auto accept = [&](const auto& candidate) {
+            return !GET_CONFIG_VAR(legit_aimbot_vars::WallCheck)
+                || Tracing::isVisible(eye.value(), candidate.aimPoint, localPawn.baseEntity(), candidate.entity);
+        };
+        // Captured before any feature presses the button for the user (see
+        // onWriteMoveCrc) - also gates the record-acquisition fallback below.
+        const bool userFiring = userCmd.isButtonDown(cs2::CCSGOInput::Buttons::kAttack);
+        auto aim = aimTarget.acquire(eye.value(), currentPitch.value(), currentYaw.value(), maxFov, hitboxFlags(),
+            accept, preferredTarget, static_cast<target_selection::Mode>(static_cast<std::uint8_t>(GET_CONFIG_VAR(legit_aimbot_vars::TargetSelection))));
+        // Backtrack acquisition - independent of the legit FOV measured on the
+        // LIVE body (2026-10-28: "make it function like normal backtrack").
+        // Clicking with the crosshair on a lag ghost - behind a strafing
+        // target, often outside the legit FOV of the live pose - fails the
+        // live acquire and the click would resolve on the live tick. On firing
+        // commands, accept a target whose RECORD sits under the crosshair
+        // instead: the gate is the FOV to that record (i.e. still under the
+        // user's crosshair - never a pull to a distant enemy) plus the same
+        // WallCheck. Live acquire keeps precedence, and the record refinement
+        // below re-picks and re-validates the record anyway.
+        if (!aim.hasValue() && userFiring && GET_CONFIG_VAR(legit_aimbot_vars::Backtrack))
+            aim = acquireByRecord(eye.value(), currentPitch.value(), currentYaw.value(), maxFov, hitboxFlags(),
+                                  accept, preferredTarget);
         if (!aim.hasValue()) {
             lastTargetHandleValue = 0; acquisition.reset();
             return;
@@ -107,12 +126,23 @@ public:
                 static_cast<float>(GET_CONFIG_VAR(legit_aimbot_vars::ReactionMs)) / 1000,
                 static_cast<float>(GET_CONFIG_VAR(legit_aimbot_vars::SwitchDelayMs)) / 1000)) return;
 
-        // Lag-record refinement (backtrack): steer toward the best record point near
-        // the crosshair instead of the live pose, then stamp the shot with the
-        // record's sim time in onWriteMoveCrc so the server resolves it at the tick
-        // the record was captured. Constrained to the same legit FOV + WallCheck as
-        // the live acquire (the ghost can never pull the aim beyond human range),
-        // and the smoothing/reaction delays above still gate the walk toward it.
+        // Lag-record refinement (backtrack): steer toward the best record point
+        // instead of the live pose, then stamp the shot with the record's sim
+        // time in onWriteMoveCrc so the server resolves it at the tick the
+        // record was captured (SubtickShotWriter's backtrack path, the rage
+        // aimbot's pattern).
+        // INDEPENDENT OF THE LEGIT FOV (2026-10-28, friend request): the
+        // record's reach is BacktrackTicks ALONE - the old
+        // `recordFov <= maxFov` gate silently dropped the stamp whenever the
+        // crosshair trailed a strafing target (records sit behind it, outside
+        // the FOV while the live pose was still inside) - the main
+        // "sometimes it doesn't proc when shot" cause. What still gates a
+        // stamp: WallCheck on the record's aim point (no wallbang stamps) and
+        // the server tick guard (the server only credits ticks it hasn't
+        // simulated yet). The smoothing/reaction delays above still gate the
+        // walk toward the record, and with Visible Mouse Aim the user's own
+        // mouse direction stays the bullet direction - only the resolve tick
+        // is historical.
         float pitch = aim.value().angles.pitch, yaw = aim.value().angles.yaw;
         float backtrackSimTime = 0.0f;
         if (GET_CONFIG_VAR(legit_aimbot_vars::Backtrack)) {
@@ -122,12 +152,9 @@ public:
                 static_cast<int>(GET_CONFIG_VAR(legit_aimbot_vars::BacktrackTicks)));
             if (record.hasValue()) {
                 const auto recordAngles = shot_geometry::anglesTo(eye.value(), record.value().aimPoint);
-                const float dPitch = recordAngles.pitch - currentPitch.value();
-                const float dYaw = trig::normalizeDegrees(recordAngles.yaw - currentYaw.value());
-                const float recordFov = trig::squareRoot(dPitch * dPitch + dYaw * dYaw);
-                if (recordFov <= maxFov
-                    && (!GET_CONFIG_VAR(legit_aimbot_vars::WallCheck)
-                        || Tracing::isVisible(eye.value(), record.value().aimPoint, localPawn.baseEntity(), aim.value().entity))) {
+                // Same WallCheck as everywhere else, on the RECORD's aim point.
+                if (!GET_CONFIG_VAR(legit_aimbot_vars::WallCheck)
+                    || Tracing::isVisible(eye.value(), record.value().aimPoint, localPawn.baseEntity(), aim.value().entity)) {
                     // A shot can only be stamped with a tick the server hasn't
                     // simulated yet (the rage aimbot's own guard).
                     const auto serverTick = hookContext.localPlayerController().tickBase();
@@ -143,7 +170,6 @@ public:
                 }
             }
         }
-        const bool userFiring = userCmd.isButtonDown(cs2::CCSGOInput::Buttons::kAttack);
         if (GET_CONFIG_VAR(legit_aimbot_vars::RecoilCompensation)) {
             if (const auto punch = localPawn.aimPunchAngle(); punch.hasValue()) {
                 pitch -= punch.value().x; yaw -= punch.value().y;
@@ -241,6 +267,77 @@ private:
             .arms = GET_CONFIG_VAR(legit_aimbot_vars::HitArms),
             .legs = GET_CONFIG_VAR(legit_aimbot_vars::HitLegs),
         };
+    }
+
+    // Backtrack-only acquisition (see the call site): runs when the LIVE
+    // acquire failed - the crosshair is on a lag ghost, not on the live body -
+    // and finds the enemy whose RECORD sits under the crosshair. The gate is
+    // the FOV to that record (so nothing beyond what the user already points
+    // at can ever be pulled in) plus the shared WallCheck predicate; the
+    // record window is BacktrackTicks, like the refinement. Ranked by
+    // crosshair distance to the record (for a ghost click that IS the right
+    // rank), incumbent first so target lock keeps its precedence; the
+    // live-acquire gates (enemy/alive/immunity/health) are mirrored 1:1.
+    template <typename Accept>
+    [[nodiscard]] Optional<typename AimTarget<HookContext>::Target> acquireByRecord(
+        const cs2::Vector& eye, float pitch, float yaw, float maxFov,
+        const typename AimTarget<HookContext>::HitboxFlags& hitboxes, Accept&& accept,
+        cs2::C_BaseEntity* preferredEntity) const noexcept
+    {
+        using Target = typename AimTarget<HookContext>::Target;
+        Optional<Target> best;
+        if (!(maxFov > 0.0f)) // NaN-safe: a degenerate maxFov acquires nothing
+            return best;
+        float bestFov = maxFov;
+        const auto consider = [&](cs2::C_BaseEntity* entity) {
+            if (!entity)
+                return;
+            const auto record = hookContext.template make<Lagcomp>().bestRecord(
+                entity, eye, pitch, yaw, hitboxes.head, hitboxes.chest, hitboxes.stomach,
+                hitboxes.arms, hitboxes.legs,
+                static_cast<int>(GET_CONFIG_VAR(legit_aimbot_vars::BacktrackTicks)));
+            if (!record.hasValue())
+                return;
+            const auto angles = shot_geometry::anglesTo(eye, record.value().aimPoint);
+            const float dPitch = angles.pitch - pitch;
+            const float dYaw = trig::normalizeDegrees(angles.yaw - yaw);
+            const float fov = trig::squareRoot(dPitch * dPitch + dYaw * dYaw);
+            if (fov > bestFov)
+                return;
+            Target candidate{{angles.pitch, angles.yaw}, record.value().aimPoint, entity,
+                             record.value().hitgroup, record.value().shape};
+            if (!accept(candidate))
+                return;
+            bestFov = fov;
+            best = candidate;
+        };
+
+        // Target lock: the incumbent wins when one of its records is under
+        // the crosshair (same preferred-first precedence as the live acquire).
+        if (preferredEntity)
+            consider(preferredEntity);
+        if (best.hasValue())
+            return best;
+
+        hookContext.template make<EntitySystem>().forEachNetworkableEntityIdentity([&](const auto& identity) {
+            auto* const entity = static_cast<cs2::C_BaseEntity*>(identity.entity);
+            if (entity == preferredEntity)
+                return;
+            const auto entityTypeInfo = hookContext.entityClassifier().classifyEntity(identity.entityClass);
+            if (!entityTypeInfo.template is<cs2::C_CSPlayerPawn>())
+                return;
+            auto&& pawn = hookContext.template make<PlayerPawn>(static_cast<cs2::C_CSPlayerPawn*>(identity.entity));
+            if (!pawn || pawn.isControlledByLocalPlayer() || pawn.isEnemy() != true || pawn.isAlive() != true)
+                return;
+            if constexpr (requires { pawn.hasImmunity(); }) {
+                if (pawn.hasImmunity() != false) return;
+            }
+            const auto health = pawn.health();
+            if (!health.hasValue() || health.value() <= 0)
+                return;
+            consider(entity);
+        });
+        return best;
     }
 
     
