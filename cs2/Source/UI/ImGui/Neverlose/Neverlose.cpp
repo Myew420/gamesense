@@ -3830,11 +3830,12 @@ void pageEffects() noexcept
         floatSliderVar<HitmarkerTimeout>("Fade Time (ms)", ++controlId);
         colorVar<HitmarkerColor>("Marker Color", ++controlId);
     });
-    addCard("CAMERA", 5, [] {
+    addCard("CAMERA", 6, [] {
         toggleVar<ForceThirdPersonEnabled>("Force Third Person", ++controlId);
         floatSliderVar<ForceThirdPersonDistance>("Distance", ++controlId);
         toggleVar<RemoveViewPunch>("Remove View Punch", ++controlId);
         toggleVar<freecam_vars::Enabled>("Freecam", ++controlId);
+        keybindVar<freecam_vars::KeyBind>("Freecam Key", ++controlId);
         floatSliderVar<freecam_vars::Speed>("Freecam Speed", ++controlId);
     });
     addCard("REMOVALS", 3, [] {
@@ -8239,10 +8240,43 @@ void registerFeatureBinds() noexcept
     feature_binds::registerToggle<spectator_list_params::SpectatorListEnabled>("Spectator List");
 }
 
+// Freecam's dedicated key row: rising-edge toggle of Enabled, polled on the
+// render thread (Freecam has no CreateMove hook of its own). Runs right after
+// feature_binds::apply(), which owns any edge on a feature_binds key bound to
+// the same toggle - sharing one key between the two would otherwise flip
+// Enabled twice and cancel out. A key-capture gesture in the menu owns its
+// press too: while capture is active the edge is swallowed and wasDown stays
+// set, so binding the key does not fire it on the frame the capture
+// completes either (the newly bound key is physically down at that point).
+void pollFreecamKey() noexcept
+{
+    static bool wasDown = false;
+    const int key = static_cast<int>(static_cast<freecam_vars::KeyBind::ValueType::ValueType>(ui_config::get<freecam_vars::KeyBind>()));
+    if (key <= Bind::kOff || key > Bind::kLast) {
+        wasDown = false;
+        return;
+    }
+    if (state.capture != State::Capture::Inactive) {
+        wasDown = true;
+        return;
+    }
+    if (!Bind::isDown(key)) {
+        wasDown = false;
+        return;
+    }
+    if (wasDown)
+        return;
+    wasDown = true;
+    if (const auto* entry = feature_binds::entryFor<freecam_vars::Enabled>(); entry && entry->key == key)
+        return;
+    ui_config::set<freecam_vars::Enabled>(!ui_config::get<freecam_vars::Enabled>());
+}
+
 void neverlose::renderGameOverlay() noexcept
 {
     registerFeatureBinds();
     feature_binds::apply();
+    pollFreecamKey();
 
     refreshMenuTheme();
 
@@ -8990,6 +9024,7 @@ float drawBindsListWindow(float extraYOffset) noexcept
         {"Fake Intel", static_cast<int>(static_cast<chat_vars::IntelBind::ValueType::ValueType>(ui_config::get<chat_vars::IntelBind>())), false},
         {"Fake Kick", static_cast<int>(static_cast<chat_vars::KickKey::ValueType::ValueType>(ui_config::get<chat_vars::KickKey>())), false},
         {"Last Tick Defuse", static_cast<int>(static_cast<last_tick_vars::DefuseKey::ValueType::ValueType>(ui_config::get<last_tick_vars::DefuseKey>())), false},
+        {"Freecam", static_cast<int>(static_cast<freecam_vars::KeyBind::ValueType::ValueType>(ui_config::get<freecam_vars::KeyBind>())), false},
     };
 
     

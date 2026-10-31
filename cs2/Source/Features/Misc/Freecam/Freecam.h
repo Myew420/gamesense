@@ -8,6 +8,7 @@
 #include <CS2/Classes/Vector.h>
 #include <CS2/Classes/ViewSetup.h>
 #include <Features/Misc/Freecam/FreecamConfigVariables.h>
+#include <GameClient/SubtickMoves.h>
 #include <GameClient/UserCmd.h>
 #include <HookContext/HookContextMacros.h>
 #include <Utils/Trig.h>
@@ -17,8 +18,9 @@
 // snapshotted at command-build time (W/S fly along the full view direction,
 // A/D strafe on the horizontal plane, jump rises, duck descends); the view
 // angles are left alone, so the camera keeps looking wherever the mouse
-// points. While engaged, the player's own movement is frozen in
-// onWriteMoveCrc - the body stays put while the camera roams.
+// points. While engaged, the player's body is frozen in onWriteMoveCrc - no
+// walking, jumping, crouching, shooting or using - so the body stands guard
+// while the camera roams.
 template <typename HookContext>
 class Freecam {
 public:
@@ -52,14 +54,25 @@ public:
         if (userCmd.isButtonDown(kDuckButton)) buttons |= kDuckButton;
         inputButtons = buttons;
 
-        // Freeze the body: zero the command's movement buttons + analog
-        // moves so the server keeps the player where it stands. Touch only
-        // the command's own fields - never the game's real W/A/S/D subtick
-        // samples (see StrafeCommand::commit: the replayed sample stream
-        // carries key state across ticks, and deleting samples strands keys).
+        // Freeze the body: zero the command's movement + interaction buttons
+        // and analog moves so the server keeps the player where it stands and
+        // shooting, planting and jumping all stop with it. The banks alone are
+        // not enough: a FRESH subtick press event fires mid-tick even with the
+        // banks zeroed - that is why space still jumped and mouse1 still fired
+        // through a bank-only freeze - so the samples' presses are rewritten
+        // as releases too. Samples are never deleted: the replayed button
+        // stream carries key state across ticks, and deleting a real
+        // press/release pair strands the key (StrafeCommand::commit).
         userCmd.replaceButtons(kFreezeMask, 0);
         userCmd.setForwardMove(0.0f);
         userCmd.setLeftMove(0.0f);
+        // Also clear attack1_start_history_index (the staged shot's timing
+        // marker): a sent attack without it trips the server's "no attack
+        // information present" warning, and a leftover marker from a cancelled
+        // shot has no business surviving the freeze (Aimbot's spread gate
+        // cancels a shot with this exact pair).
+        userCmd.suppressAttack(Buttons::kAttack);
+        SubtickMoves<HookContext>::releaseButtons(userCmd.baseMessage(), kFreezeMask);
     }
 
     void overrideView(ViewSetup* viewSetup) const noexcept
@@ -140,12 +153,19 @@ private:
             && angles.z >= -kMaxPitch && angles.z <= kMaxPitch;
     }
 
-    // Camera up/down: CCSGOInput::Buttons has no duck constant.
+    // CCSGOInput::Buttons only names attack/jump/move; the rest follow the
+    // Source IN_ bits this enum is laid out on (duck/use/attack2 verified
+    // against LastTickDefuse's kUseButton and Lua's kInAttack2).
     static constexpr std::uint64_t kDuckButton = 0x4;
-    static constexpr std::uint64_t kFreezeMask = cs2::CCSGOInput::Buttons::kForward
+    static constexpr std::uint64_t kUseButton = 0x20;
+    static constexpr std::uint64_t kAttack2Button = 0x800;
+    // Everything the body can DO to the world or itself: move, jump, crouch,
+    // fire (both buttons) and interact (plant/defuse/pickup).
+    static constexpr std::uint64_t kFreezeMask = cs2::CCSGOInput::Buttons::kAttack
+        | cs2::CCSGOInput::Buttons::kJump | cs2::CCSGOInput::Buttons::kForward
         | cs2::CCSGOInput::Buttons::kBack | cs2::CCSGOInput::Buttons::kMoveLeft
-        | cs2::CCSGOInput::Buttons::kMoveRight | cs2::CCSGOInput::Buttons::kJump
-        | kDuckButton;
+        | cs2::CCSGOInput::Buttons::kMoveRight | kDuckButton | kUseButton
+        | kAttack2Button;
 
     HookContext& hookContext;
     inline static cs2::Vector position{};

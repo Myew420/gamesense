@@ -361,6 +361,7 @@ using ConfigVariableTypes = TypeList<
     discord_rpc_vars::Enabled,
     freecam_vars::Enabled,
     freecam_vars::Speed,
+    freecam_vars::KeyBind,
     hud_theme_vars::Enabled,
     grenade_aim_vars::Enabled,
     bullet_impacts_vars::Enabled,

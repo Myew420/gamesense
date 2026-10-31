@@ -101,6 +101,7 @@ private:
         configConversion.beginObject(u8"Freecam");
         configConversion.boolean(u8"Enabled", loadVariable<freecam_vars::Enabled>(), saveVariable<freecam_vars::Enabled>());
         configConversion.floating(u8"Speed", loadVariable<freecam_vars::Speed>(), saveVariable<freecam_vars::Speed>());
+        configConversion.uint(u8"KeyBind", loadVariable<freecam_vars::KeyBind>(), saveVariable<freecam_vars::KeyBind>());
         configConversion.endObject();
     }
 
